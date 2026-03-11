@@ -27,7 +27,6 @@
 #include "../include/privacy/encryption.h"
 #include "../include/privacy/batch_decryptor.h"
 
-#include <sodium.h>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -65,7 +64,7 @@ static void print_result(const char* label, size_t count,
 }
 
 /** Create a realistic sealed transaction. */
-static std::vector<uint8_t> make_sealed(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
+static std::vector<uint8_t> make_sealed(const uint8_t pub[SO_PUBLIC_KEY_BYTES],
                                         int index)
 {
     char buf[128];
@@ -73,7 +72,7 @@ static std::vector<uint8_t> make_sealed(const uint8_t pub[crypto_box_PUBLICKEYBY
                      "TRADE|BUY|ETH/USDC|%.6f|3000.00|%d",
                      1.0 + index * 0.001, index);
     size_t pt_len = (size_t)n;
-    size_t ct_len = pt_len + crypto_box_SEALBYTES;
+    size_t ct_len = pt_len + SO_SEAL_BYTES;
     std::vector<uint8_t> ct(ct_len);
     seal_transaction(reinterpret_cast<const uint8_t*>(buf), pt_len, pub, ct.data());
     return ct;
@@ -82,7 +81,7 @@ static std::vector<uint8_t> make_sealed(const uint8_t pub[crypto_box_PUBLICKEYBY
 // ─── Benchmark 1: Key Generation ─────────────────────────────────────────────
 
 void bench_keygen(int iterations) {
-    uint8_t pub[crypto_box_PUBLICKEYBYTES], sec[crypto_box_SECRETKEYBYTES];
+    uint8_t pub[SO_PUBLIC_KEY_BYTES], sec[SO_SECRET_KEY_BYTES];
 
     auto start = Clock::now();
     for (int i = 0; i < iterations; i++) {
@@ -95,10 +94,10 @@ void bench_keygen(int iterations) {
 
 // ─── Benchmark 2: Seal (encrypt) ─────────────────────────────────────────────
 
-void bench_seal(const uint8_t pub[crypto_box_PUBLICKEYBYTES], int iterations) {
+void bench_seal(const uint8_t pub[SO_PUBLIC_KEY_BYTES], int iterations) {
     const char* msg = "TRADE|BUY|ETH/USDC|1.500000|3200.00|0";
     size_t pt_len   = strlen(msg);
-    size_t ct_len   = pt_len + crypto_box_SEALBYTES;
+    size_t ct_len   = pt_len + SO_SEAL_BYTES;
     std::vector<uint8_t> ct(ct_len);
 
     auto start = Clock::now();
@@ -112,13 +111,13 @@ void bench_seal(const uint8_t pub[crypto_box_PUBLICKEYBYTES], int iterations) {
 
 // ─── Benchmark 3: Single Decrypt ─────────────────────────────────────────────
 
-void bench_decrypt_single(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
-                           const uint8_t sec[crypto_box_SECRETKEYBYTES],
+void bench_decrypt_single(const uint8_t pub[SO_PUBLIC_KEY_BYTES],
+                           const uint8_t sec[SO_SECRET_KEY_BYTES],
                            int iterations)
 {
     // Pre-seal one transaction to decrypt repeatedly
     auto ct = make_sealed(pub, 0);
-    size_t pt_len = ct.size() - crypto_box_SEALBYTES;
+    size_t pt_len = ct.size() - SO_SEAL_BYTES;
 
     EncryptedTx enc { ct.data(), ct.size() };
     std::vector<uint8_t> buf(pt_len);
@@ -135,8 +134,8 @@ void bench_decrypt_single(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
 
 // ─── Benchmark 4: Batch Decrypt (C function) ─────────────────────────────────
 
-void bench_decrypt_batch(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
-                          const uint8_t sec[crypto_box_SECRETKEYBYTES],
+void bench_decrypt_batch(const uint8_t pub[SO_PUBLIC_KEY_BYTES],
+                          const uint8_t sec[SO_SECRET_KEY_BYTES],
                           size_t batch_size, int iterations)
 {
     // Pre-build a batch of sealed transactions
@@ -147,7 +146,7 @@ void bench_decrypt_batch(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
 
     for (size_t i = 0; i < batch_size; i++) {
         ciphertexts[i] = make_sealed(pub, (int)i);
-        size_t pt_len  = ciphertexts[i].size() - crypto_box_SEALBYTES;
+        size_t pt_len  = ciphertexts[i].size() - SO_SEAL_BYTES;
         recovered[i].resize(pt_len);
         enc_arr[i] = { ciphertexts[i].data(), ciphertexts[i].size() };
         dec_arr[i] = { recovered[i].data(), 0, (uint32_t)i, 0 };
@@ -171,8 +170,8 @@ void bench_decrypt_batch(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
 
 // ─── Benchmark 5: BatchDecryptor class (persistent thread pool) ──────────────
 
-void bench_batch_decryptor_class(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
-                                  const uint8_t sec[crypto_box_SECRETKEYBYTES],
+void bench_batch_decryptor_class(const uint8_t pub[SO_PUBLIC_KEY_BYTES],
+                                  const uint8_t sec[SO_SECRET_KEY_BYTES],
                                   size_t batch_size, int iterations)
 {
     std::vector<std::vector<uint8_t>> ciphertexts(batch_size);
@@ -182,7 +181,7 @@ void bench_batch_decryptor_class(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
 
     for (size_t i = 0; i < batch_size; i++) {
         ciphertexts[i] = make_sealed(pub, (int)i);
-        size_t pt_len  = ciphertexts[i].size() - crypto_box_SEALBYTES;
+        size_t pt_len  = ciphertexts[i].size() - SO_SEAL_BYTES;
         recovered[i].resize(pt_len);
         enc_arr[i] = { ciphertexts[i].data(), ciphertexts[i].size() };
         dec_arr[i] = { recovered[i].data(), 0, (uint32_t)i, 0 };
@@ -209,13 +208,13 @@ void bench_batch_decryptor_class(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
 
 // ─── Benchmark 6: End-to-end single transaction latency ──────────────────────
 
-void bench_e2e_latency(const uint8_t pub[crypto_box_PUBLICKEYBYTES],
-                        const uint8_t sec[crypto_box_SECRETKEYBYTES],
+void bench_e2e_latency(const uint8_t pub[SO_PUBLIC_KEY_BYTES],
+                        const uint8_t sec[SO_SECRET_KEY_BYTES],
                         int iterations)
 {
     const char* msg = "TRADE|BUY|ETH/USDC|2.000000|3250.00|0";
     size_t pt_len   = strlen(msg);
-    size_t ct_len   = pt_len + crypto_box_SEALBYTES;
+    size_t ct_len   = pt_len + SO_SEAL_BYTES;
     std::vector<uint8_t> ct(ct_len), recovered(pt_len);
 
     DecryptedTx dec { recovered.data(), 0, 0, 0 };
@@ -241,7 +240,7 @@ int main() {
         return 1;
     }
 
-    uint8_t pub[crypto_box_PUBLICKEYBYTES], sec[crypto_box_SECRETKEYBYTES];
+    uint8_t pub[SO_PUBLIC_KEY_BYTES], sec[SO_SECRET_KEY_BYTES];
     generate_sequencer_keys(pub, sec);
 
     printf("\n");

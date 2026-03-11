@@ -20,6 +20,13 @@ extern "C" {
 #define SO_ERR_BUFFER_SMALL -3
 #define SO_ERR_INIT_FAILED  -4   // sodium_init() failed
 
+// Key / Seal size constants
+// Mirror libsodium's crypto_box_* values so callers do not need
+// to include <sodium.h> just to allocate key buffers.
+#define SO_PUBLIC_KEY_BYTES  32   /* = crypto_box_PUBLICKEYBYTES */
+#define SO_SECRET_KEY_BYTES  32   /* = crypto_box_SECRETKEYBYTES */
+#define SO_SEAL_BYTES        48   /* = crypto_box_SEALBYTES       */
+
 // Data Structures
 
 // Represents an encrypted transaction (NaCl sealed box)
