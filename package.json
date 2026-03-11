@@ -1,0 +1,26 @@
+{
+  "name": "secureorder",
+  "version": "1.0.0",
+  "description": "## Team - Devarsh Doshi - Dhairya Rupani   - Drumil Bhati - Prasham Mehta - Vidhan Nahar",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "^3.0.9",
+    "@nomicfoundation/hardhat-toolbox-viem": "^5.0.3",
+    "@types/node": "^22.19.15",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.4",
+    "hardhat": "^3.1.11",
+    "typescript": "~5.8.0",
+    "viem": "^2.47.1"
+  },
+  "type": "module"
+}

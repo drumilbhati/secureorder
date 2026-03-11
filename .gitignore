@@ -71,3 +71,15 @@ Thumbs.db
 # Smart contract artifacts
 contracts/build/
 contracts/artifacts/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Hardhat
+artifacts/
+cache/
+coverage/
+ignition/
+typechain-types/
