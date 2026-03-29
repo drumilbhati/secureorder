@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package rpc_service;
+
+option go_package = "./proto";
+
+service RPCService {
+  // SubmitTx receives the raw sealed-box ciphertext from client
+  rpc SubmitTx(SubmitRequest) returns (SubmitAck) {}
+}
+
+message SubmitRequest {
+  bytes ciphertext = 1;
+}
+
+message SubmitAck {
+  bool accepted = 1;
+}
