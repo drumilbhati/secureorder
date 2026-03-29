@@ -4,6 +4,8 @@ import threading
 import time
 import uuid
 
+import grpc
+
 try:
     import matplotlib.pyplot as plt
 
@@ -13,10 +15,16 @@ except ImportError:
     print("Warning: matplotlib is not installed. Visualization will be skipped.")
     print("Install it using: pip install matplotlib")
 
-# Optional: If you want to actually spam the Go sequencer, you would need grpcio and the compiled protos.
-# For this simulation, we will model the DEX and the concurrent load, generating the "encrypted" payloads
-# that *would* be sent to the sequencer, demonstrating the exact math and ordering.
-# To integrate with real gRPC later, uncomment and use grpc.insecure_channel('localhost:12345').
+try:
+    import rpc_pb2
+    import rpc_pb2_grpc
+except ImportError:
+    print("Error: Could not import generated gRPC files.")
+    print("Please run the following command in the scripts directory first:")
+    print(
+        "python -m grpc_tools.protoc -I../proto --python_out=. --grpc_python_out=. ../proto/rpc.proto"
+    )
+    exit(1)
 
 
 class ConstantProductDEX:
@@ -76,8 +84,9 @@ class ConstantProductDEX:
 
 def encode_transaction(action, **kwargs):
     """
-    Mocks the creation of a payload that would be encrypted by the C++ layer
-    and sent to the Go sequencer.
+    Creates a payload and encodes it into bytes.
+    In the real C++ integration, this payload would be strongly encrypted.
+    Here we simulate the raw sealed-box ciphertext going over the network.
     """
     payload = {
         "tx_id": str(uuid.uuid4())[:8],
@@ -85,38 +94,50 @@ def encode_transaction(action, **kwargs):
         "timestamp": time.time(),
         "params": kwargs,
     }
-    # In a real run, this JSON string is encrypted into raw bytes.
     return json.dumps(payload).encode("utf-8")
 
 
-def simulate_liquidity_provider(dex_model, num_actions=5):
+def simulate_liquidity_provider(dex_model, stub, num_actions=5):
     """LPs occasionally add large chunks of liquidity to stabilize the pool."""
     for _ in range(num_actions):
         time.sleep(random.uniform(0.1, 0.5))
-        # Add somewhat balanced liquidity
         amount = random.uniform(5000, 15000)
         dex_model.add_liquidity(amount, amount)
+
         tx_bytes = encode_transaction("ADD_LIQUIDITY", amount_a=amount, amount_b=amount)
-        # TODO: send tx_bytes to Go Sequencer via gRPC
-        print(f"[LP] Added Liquidity: {amount:.2f} A / {amount:.2f} B")
+
+        # Send to actual Go Sequencer via gRPC
+        try:
+            req = rpc_pb2.SubmitRequest(ciphertext=tx_bytes)
+            stub.SubmitTx(req)
+            print(f"[LP] Sent Add Liquidity: {amount:.2f} A / {amount:.2f} B")
+        except grpc.RpcError as e:
+            print(f"[LP] gRPC Error: {e.code()}")
 
 
-def simulate_trader(dex_model, trader_id, num_trades=20):
+def simulate_trader(dex_model, trader_id, stub, num_trades=20):
     """Traders rapidly spam buy/sell orders, causing high concurrency load."""
     for _ in range(num_trades):
         time.sleep(random.uniform(0.01, 0.1))  # Fast trading
         trade_type = random.choice(["SWAP_A_FOR_B", "SWAP_B_FOR_A"])
         amount = random.uniform(10, 500)
 
+        # Update local mathematical model
         if trade_type == "SWAP_A_FOR_B":
             out = dex_model.swap_a_for_b(amount)
-            print(f"[Trader {trader_id}] Swapped {amount:.2f} A for {out:.2f} B")
+            print(f"[Trader {trader_id}] Sent Swap: {amount:.2f} A for {out:.2f} B")
         else:
             out = dex_model.swap_b_for_a(amount)
-            print(f"[Trader {trader_id}] Swapped {amount:.2f} B for {out:.2f} A")
+            print(f"[Trader {trader_id}] Sent Swap: {amount:.2f} B for {out:.2f} A")
 
         tx_bytes = encode_transaction(trade_type, amount_in=amount)
-        # TODO: send tx_bytes to Go Sequencer via gRPC
+
+        # Send to actual Go Sequencer via gRPC
+        try:
+            req = rpc_pb2.SubmitRequest(ciphertext=tx_bytes)
+            stub.SubmitTx(req)
+        except grpc.RpcError as e:
+            print(f"[Trader {trader_id}] gRPC Error: {e.code()}")
 
 
 def plot_results(dex_model):
@@ -135,7 +156,7 @@ def plot_results(dex_model):
 
     plt.figure(figsize=(10, 5))
     plt.plot(relative_times, prices, marker="o", linestyle="-", markersize=3, alpha=0.7)
-    plt.title("DEX Simulation: Token A Price Impact Under High Load")
+    plt.title("DEX Stress Test: Token A Price Impact & Sequencer Load")
     plt.xlabel("Time (seconds)")
     plt.ylabel("Price of Token A (in Token B)")
     plt.grid(True)
@@ -149,24 +170,31 @@ def plot_results(dex_model):
 
 if __name__ == "__main__":
     print("========================================")
-    print("   SECURE-ORDER DEX STRESS TEST MODEL   ")
+    print("   SECURE-ORDER DEX STRESS TEST (gRPC)  ")
     print("========================================")
+
+    # Establish connection to the Go Sequencer running locally
+    print("Connecting to Go Sequencer at localhost:12345...")
+    channel = grpc.insecure_channel("localhost:12345")
+    stub = rpc_pb2_grpc.RPCServiceStub(channel)
 
     dex = ConstantProductDEX(reserve_a=100000, reserve_b=100000)
 
     print(f"Initial Pool State: {dex.reserve_a} A / {dex.reserve_b} B")
-    print("Starting simulation with concurrent LPs and Traders...\n")
+    print(
+        "Starting simulation with concurrent LPs and Traders hitting the gRPC server...\n"
+    )
 
     threads = []
 
     # 2 Liquidity Providers
     for i in range(2):
-        t = threading.Thread(target=simulate_liquidity_provider, args=(dex, 5))
+        t = threading.Thread(target=simulate_liquidity_provider, args=(dex, stub, 5))
         threads.append(t)
 
-    # 10 Concurrent Traders spamming the system
-    for i in range(10):
-        t = threading.Thread(target=simulate_trader, args=(dex, i, 15))
+    # 20 Concurrent Traders spamming the system
+    for i in range(20):
+        t = threading.Thread(target=simulate_trader, args=(dex, i, stub, 15))
         threads.append(t)
 
     # Start the firehose
