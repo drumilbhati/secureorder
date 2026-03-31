@@ -4,38 +4,35 @@
 # source: rpc.proto
 # Protobuf Python Version: 6.31.1
 """Generated protocol buffer code."""
+
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 _runtime_version.ValidateProtobufRuntimeVersion(
-    _runtime_version.Domain.PUBLIC,
-    6,
-    31,
-    1,
-    '',
-    'rpc.proto'
+    _runtime_version.Domain.PUBLIC, 6, 31, 1, "", "rpc.proto"
 )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\trpc.proto\x12\x0brpc_service\"#\n\rSubmitRequest\x12\x12\n\nciphertext\x18\x01 \x01(\x0c\"\x1d\n\tSubmitAck\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x32N\n\nRPCService\x12@\n\x08SubmitTx\x12\x1a.rpc_service.SubmitRequest\x1a\x16.rpc_service.SubmitAck\"\x00\x42\tZ\x07./protob\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+    b'\n\trpc.proto\x12\x0brpc_service"#\n\rSubmitRequest\x12\x12\n\nciphertext\x18\x01 \x01(\x0c"\x1d\n\tSubmitAck\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x32N\n\nRPCService\x12@\n\x08SubmitTx\x12\x1a.rpc_service.SubmitRequest\x1a\x16.rpc_service.SubmitAck"\x00\x42\tZ\x07./protob\x06proto3'
+)
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'rpc_pb2', _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "rpc_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
-  _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z\007./proto'
-  _globals['_SUBMITREQUEST']._serialized_start=26
-  _globals['_SUBMITREQUEST']._serialized_end=61
-  _globals['_SUBMITACK']._serialized_start=63
-  _globals['_SUBMITACK']._serialized_end=92
-  _globals['_RPCSERVICE']._serialized_start=94
-  _globals['_RPCSERVICE']._serialized_end=172
+    _globals["DESCRIPTOR"]._loaded_options = None
+    _globals["DESCRIPTOR"]._serialized_options = b"Z\007./proto"
+    _globals["_SUBMITREQUEST"]._serialized_start = 26
+    _globals["_SUBMITREQUEST"]._serialized_end = 61
+    _globals["_SUBMITACK"]._serialized_start = 63
+    _globals["_SUBMITACK"]._serialized_end = 92
+    _globals["_RPCSERVICE"]._serialized_start = 94
+    _globals["_RPCSERVICE"]._serialized_end = 172
 # @@protoc_insertion_point(module_scope)
