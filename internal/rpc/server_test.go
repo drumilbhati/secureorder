@@ -39,6 +39,10 @@ func TestSubmitTx_Success(t *testing.T) {
 	if string(txs[0].Ciphertext) != "test-encrypted-data" {
 		t.Errorf("expected ciphertext 'test-encrypted-data', got %q", string(txs[0].Ciphertext))
 	}
+
+	if server.ProofCount() != 1 {
+		t.Errorf("expected 1 reception proof, got %d", server.ProofCount())
+	}
 }
 
 func TestSubmitTx_ContextCancelled(t *testing.T) {
@@ -122,5 +126,21 @@ func TestSubmitTx_LargeCiphertext(t *testing.T) {
 	}
 	if !ack.Accepted {
 		t.Error("expected accepted=true for large ciphertext")
+	}
+}
+
+func TestSubmitTx_ReceptionProofMonotonic(t *testing.T) {
+	queue := sequencing.NewTxQueue(10)
+	server := NewServer(queue)
+
+	for i := 0; i < 3; i++ {
+		_, err := server.SubmitTx(context.Background(), &pb.SubmitRequest{Ciphertext: []byte("ct")})
+		if err != nil {
+			t.Fatalf("submit %d failed: %v", i, err)
+		}
+	}
+
+	if server.ProofCount() != 3 {
+		t.Fatalf("expected 3 proofs, got %d", server.ProofCount())
 	}
 }

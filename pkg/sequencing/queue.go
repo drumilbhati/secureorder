@@ -45,6 +45,13 @@ func NewTxQueue(capacity int) *TxQueue {
 //
 //	err := q.Submit(ctx, ciphertext)
 func (q *TxQueue) Submit(ctx context.Context, ciphertext []byte) error {
+	_, err := q.SubmitWithReceipt(ctx, ciphertext)
+	return err
+}
+
+// SubmitWithReceipt enqueues a transaction and returns the assigned sequence
+// metadata, allowing callers to create proof-of-reception commitments at ingress.
+func (q *TxQueue) SubmitWithReceipt(ctx context.Context, ciphertext []byte) (EncryptedTransaction, error) {
 	// Copy the slice so the queue owns the data regardless of what the
 	// caller does with their buffer afterwards.
 	payload := make([]byte, len(ciphertext))
@@ -58,9 +65,9 @@ func (q *TxQueue) Submit(ctx context.Context, ciphertext []byte) error {
 
 	select {
 	case q.ch <- tx:
-		return nil
+		return tx, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return EncryptedTransaction{}, ctx.Err()
 	}
 }
 

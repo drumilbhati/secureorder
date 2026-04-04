@@ -4,7 +4,12 @@ import threading
 import time
 import uuid
 
-import grpc
+try:
+    import grpc
+
+    GRPC_AVAILABLE = True
+except ImportError:
+    GRPC_AVAILABLE = False
 
 try:
     import matplotlib.pyplot as plt
@@ -18,13 +23,10 @@ except ImportError:
 try:
     import rpc_pb2
     import rpc_pb2_grpc
+
+    RPC_PROTO_AVAILABLE = True
 except ImportError:
-    print("Error: Could not import generated gRPC files.")
-    print("Please run the following command in the scripts directory first:")
-    print(
-        "python -m grpc_tools.protoc -I../proto --python_out=. --grpc_python_out=. ../proto/rpc.proto"
-    )
-    exit(1)
+    RPC_PROTO_AVAILABLE = False
 
 
 class ConstantProductDEX:
@@ -34,11 +36,23 @@ class ConstantProductDEX:
     """
 
     def __init__(self, reserve_a=100000.0, reserve_b=100000.0):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.reserve_a = reserve_a
         self.reserve_b = reserve_b
+        self.trader_token_a = {}
+        self.trader_token_b = {}
+        self.fee_vault_token_a = 0.0
+        self.fee_vault_token_b = 0.0
+        self.settlement_log = []
         self.price_history = []
         self._record_price()
+
+    def ensure_trader(self, trader_id, token_a=10000.0, token_b=10000.0):
+        with self.lock:
+            if trader_id not in self.trader_token_a:
+                self.trader_token_a[trader_id] = token_a
+            if trader_id not in self.trader_token_b:
+                self.trader_token_b[trader_id] = token_b
 
     def _record_price(self):
         # Price of Token A in terms of Token B
@@ -78,6 +92,100 @@ class ConstantProductDEX:
             self._record_price()
             return amount_a_out
 
+    def execute_atomic_swap(
+        self,
+        trader_id,
+        trade_type,
+        amount_in,
+        min_amount_out=0.0,
+        inject_failure=False,
+    ):
+        """
+        Atomically executes both legs of settlement in one commit:
+        1) swap reserve movement, 2) fee capture.
+        If any validation fails, no state is mutated.
+        """
+        with self.lock:
+            self.ensure_trader(trader_id)
+
+            if amount_in <= 0:
+                raise ValueError("amount_in must be positive")
+            if trade_type not in ("SWAP_A_FOR_B", "SWAP_B_FOR_A"):
+                raise ValueError("unsupported trade type")
+
+            if trade_type == "SWAP_A_FOR_B":
+                if self.trader_token_a[trader_id] < amount_in:
+                    raise ValueError("insufficient TokenA balance")
+
+                fee = amount_in * 0.003
+                amount_in_after_fee = amount_in - fee
+                amount_out = (amount_in_after_fee * self.reserve_b) / (
+                    self.reserve_a + amount_in_after_fee
+                )
+
+                if amount_out < min_amount_out:
+                    raise ValueError("slippage too high")
+                if amount_out <= 0 or amount_out > self.reserve_b:
+                    raise ValueError("insufficient pool TokenB liquidity")
+
+                # Stage all values first; commit only if everything is valid.
+                new_trader_a = self.trader_token_a[trader_id] - amount_in
+                new_trader_b = self.trader_token_b[trader_id] + amount_out
+                new_reserve_a = self.reserve_a + amount_in_after_fee
+                new_reserve_b = self.reserve_b - amount_out
+                new_fee_vault_a = self.fee_vault_token_a + fee
+
+                if inject_failure:
+                    raise RuntimeError("injected failure before commit")
+
+                self.trader_token_a[trader_id] = new_trader_a
+                self.trader_token_b[trader_id] = new_trader_b
+                self.reserve_a = new_reserve_a
+                self.reserve_b = new_reserve_b
+                self.fee_vault_token_a = new_fee_vault_a
+
+            else:
+                if self.trader_token_b[trader_id] < amount_in:
+                    raise ValueError("insufficient TokenB balance")
+
+                fee = amount_in * 0.003
+                amount_in_after_fee = amount_in - fee
+                amount_out = (amount_in_after_fee * self.reserve_a) / (
+                    self.reserve_b + amount_in_after_fee
+                )
+
+                if amount_out < min_amount_out:
+                    raise ValueError("slippage too high")
+                if amount_out <= 0 or amount_out > self.reserve_a:
+                    raise ValueError("insufficient pool TokenA liquidity")
+
+                # Stage all values first; commit only if everything is valid.
+                new_trader_b = self.trader_token_b[trader_id] - amount_in
+                new_trader_a = self.trader_token_a[trader_id] + amount_out
+                new_reserve_b = self.reserve_b + amount_in_after_fee
+                new_reserve_a = self.reserve_a - amount_out
+                new_fee_vault_b = self.fee_vault_token_b + fee
+
+                if inject_failure:
+                    raise RuntimeError("injected failure before commit")
+
+                self.trader_token_b[trader_id] = new_trader_b
+                self.trader_token_a[trader_id] = new_trader_a
+                self.reserve_b = new_reserve_b
+                self.reserve_a = new_reserve_a
+                self.fee_vault_token_b = new_fee_vault_b
+
+            self._record_price()
+            receipt = {
+                "trader_id": trader_id,
+                "trade_type": trade_type,
+                "amount_in": amount_in,
+                "amount_out": amount_out,
+                "timestamp": time.time(),
+            }
+            self.settlement_log.append(receipt)
+            return receipt
+
     def get_price_history(self):
         return self.price_history
 
@@ -107,6 +215,8 @@ def simulate_liquidity_provider(dex_model, stub, num_actions=5):
         tx_bytes = encode_transaction("ADD_LIQUIDITY", amount_a=amount, amount_b=amount)
 
         # Send to actual Go Sequencer via gRPC
+        if not (GRPC_AVAILABLE and RPC_PROTO_AVAILABLE):
+            continue
         try:
             req = rpc_pb2.SubmitRequest(ciphertext=tx_bytes)
             stub.SubmitTx(req)
@@ -122,17 +232,28 @@ def simulate_trader(dex_model, trader_id, stub, num_trades=20):
         trade_type = random.choice(["SWAP_A_FOR_B", "SWAP_B_FOR_A"])
         amount = random.uniform(10, 500)
 
-        # Update local mathematical model
-        if trade_type == "SWAP_A_FOR_B":
-            out = dex_model.swap_a_for_b(amount)
-            print(f"[Trader {trader_id}] Sent Swap: {amount:.2f} A for {out:.2f} B")
-        else:
-            out = dex_model.swap_b_for_a(amount)
-            print(f"[Trader {trader_id}] Sent Swap: {amount:.2f} B for {out:.2f} A")
+        trader_key = f"trader-{trader_id}"
+
+        # Atomic local settlement model: swap + fee move together or fail together.
+        try:
+            receipt = dex_model.execute_atomic_swap(trader_key, trade_type, amount)
+            if trade_type == "SWAP_A_FOR_B":
+                print(
+                    f"[Trader {trader_id}] Settled Swap: {amount:.2f} A for {receipt['amount_out']:.2f} B"
+                )
+            else:
+                print(
+                    f"[Trader {trader_id}] Settled Swap: {amount:.2f} B for {receipt['amount_out']:.2f} A"
+                )
+        except Exception as e:
+            print(f"[Trader {trader_id}] Settlement rejected: {e}")
+            continue
 
         tx_bytes = encode_transaction(trade_type, amount_in=amount)
 
         # Send to actual Go Sequencer via gRPC
+        if not (GRPC_AVAILABLE and RPC_PROTO_AVAILABLE):
+            continue
         try:
             req = rpc_pb2.SubmitRequest(ciphertext=tx_bytes)
             stub.SubmitTx(req)
@@ -173,12 +294,27 @@ if __name__ == "__main__":
     print("   SECURE-ORDER DEX STRESS TEST (gRPC)  ")
     print("========================================")
 
+    if not GRPC_AVAILABLE:
+        print("Error: grpc is not installed. Install with: pip install grpcio")
+        exit(1)
+
+    if not RPC_PROTO_AVAILABLE:
+        print("Error: Could not import generated gRPC files.")
+        print("Please run the following command in the scripts directory first:")
+        print(
+            "python -m grpc_tools.protoc -I../proto --python_out=. --grpc_python_out=. ../proto/rpc.proto"
+        )
+        exit(1)
+
     # Establish connection to the Go Sequencer running locally
     print("Connecting to Go Sequencer at localhost:12345...")
     channel = grpc.insecure_channel("localhost:12345")
     stub = rpc_pb2_grpc.RPCServiceStub(channel)
 
     dex = ConstantProductDEX(reserve_a=100000, reserve_b=100000)
+
+    for i in range(20):
+        dex.ensure_trader(f"trader-{i}")
 
     print(f"Initial Pool State: {dex.reserve_a} A / {dex.reserve_b} B")
     print(

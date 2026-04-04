@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/drumilbhati/secureorder/internal/settlement"
 	"github.com/drumilbhati/secureorder/pkg/sequencing"
 	pb "github.com/drumilbhati/secureorder/proto"
 	"google.golang.org/grpc"
@@ -12,21 +13,45 @@ import (
 
 type Server struct {
 	pb.UnimplementedRPCServiceServer
-	queue *sequencing.TxQueue
+	queue     *sequencing.TxQueue
+	proofs    *sequencing.ReceptionStore
+	publisher settlement.CommitmentPublisher
 }
 
 func NewServer(queue *sequencing.TxQueue) *Server {
+	publisher, err := settlement.NewPublisherFromEnv()
+	if err != nil {
+		publisher = settlement.NoopPublisher{}
+	}
+
 	return &Server{
-		queue: queue,
+		queue:     queue,
+		proofs:    sequencing.NewReceptionStore(),
+		publisher: publisher,
 	}
 }
 
 func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitAck, error) {
-	err := s.queue.Submit(ctx, req.Ciphertext)
+	tx, err := s.queue.SubmitWithReceipt(ctx, req.Ciphertext)
 	if err != nil {
 		return &pb.SubmitAck{Accepted: false}, fmt.Errorf("failed to submit transaction: %w", err)
 	}
+
+	s.proofs.Add(sequencing.ReceptionProof{
+		SequenceID:  tx.ID,
+		ArrivedUnix: tx.ArrivedAt.UnixNano(),
+		Commitment:  sequencing.GenerateReceptionCommitment(tx),
+	})
+
+	if last, ok := s.proofs.Last(); ok {
+		_ = s.publisher.PublishCommitment(ctx, last.Commitment)
+	}
+
 	return &pb.SubmitAck{Accepted: true}, nil
+}
+
+func (s *Server) ProofCount() int {
+	return s.proofs.Count()
 }
 
 // Register registers the RPC server with a gRPC server.
