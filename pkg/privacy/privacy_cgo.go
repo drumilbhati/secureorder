@@ -150,9 +150,22 @@ func DecryptBatch(ciphertexts [][]byte, pubKey []byte, secKey []byte) ([][]byte,
 		return [][]byte{}, nil
 	}
 
-	enc := make([]C.EncryptedTx, n)
-	dec := make([]C.DecryptedTx, n)
-	plainBuffers := make([][]byte, n)
+	encMem := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.EncryptedTx{})))
+	if encMem == nil {
+		return nil, errors.New("failed to allocate encrypted batch buffer")
+	}
+	defer C.free(encMem)
+
+	decMem := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.DecryptedTx{})))
+	if decMem == nil {
+		return nil, errors.New("failed to allocate decrypted batch buffer")
+	}
+	defer C.free(decMem)
+
+	enc := unsafe.Slice((*C.EncryptedTx)(encMem), n)
+	dec := unsafe.Slice((*C.DecryptedTx)(decMem), n)
+	cipherBuffers := make([]unsafe.Pointer, n)
+	plainBuffers := make([]unsafe.Pointer, n)
 
 	for i, ct := range ciphertexts {
 		if len(ct) < SealBytes {
@@ -162,25 +175,45 @@ func DecryptBatch(ciphertexts [][]byte, pubKey []byte, secKey []byte) ([][]byte,
 		if ptLen == 0 {
 			ptLen = 1
 		}
-		plainBuffers[i] = make([]byte, ptLen)
+		cipherBuffers[i] = C.CBytes(ct)
+		if cipherBuffers[i] == nil {
+			return nil, fmt.Errorf("failed to allocate ciphertext buffer for index %d", i)
+		}
+
+		plainBuffers[i] = C.malloc(C.size_t(ptLen))
+		if plainBuffers[i] == nil {
+			return nil, fmt.Errorf("failed to allocate plaintext buffer for index %d", i)
+		}
 
 		enc[i] = C.EncryptedTx{
-			ciphertext: (*C.uint8_t)(unsafe.Pointer(&ct[0])),
+			ciphertext: (*C.uint8_t)(cipherBuffers[i]),
 			length:     C.size_t(len(ct)),
 		}
 		dec[i] = C.DecryptedTx{
-			plaintext: (*C.uint8_t)(unsafe.Pointer(&plainBuffers[i][0])),
+			plaintext: (*C.uint8_t)(plainBuffers[i]),
 			length:    0,
 			status:    0,
 		}
 	}
+	defer func() {
+		for _, buf := range cipherBuffers {
+			if buf != nil {
+				C.free(buf)
+			}
+		}
+		for _, buf := range plainBuffers {
+			if buf != nil {
+				C.free(buf)
+			}
+		}
+	}()
 
 	ret := int(C.decrypt_batch_tx(
-		(*C.EncryptedTx)(unsafe.Pointer(&enc[0])),
+		(*C.EncryptedTx)(encMem),
 		C.size_t(n),
 		(*C.uint8_t)(unsafe.Pointer(&pubKey[0])),
 		(*C.uint8_t)(unsafe.Pointer(&secKey[0])),
-		(*C.DecryptedTx)(unsafe.Pointer(&dec[0])),
+		(*C.DecryptedTx)(decMem),
 	))
 
 	out := make([][]byte, n)
@@ -190,7 +223,7 @@ func DecryptBatch(ciphertexts [][]byte, pubKey []byte, secKey []byte) ([][]byte,
 			errIdx = append(errIdx, fmt.Sprintf("%d", i))
 			continue
 		}
-		out[i] = plainBuffers[i][:int(dec[i].length)]
+		out[i] = C.GoBytes(unsafe.Pointer(dec[i].plaintext), C.int(dec[i].length))
 	}
 
 	if ret != 0 || len(errIdx) > 0 {
