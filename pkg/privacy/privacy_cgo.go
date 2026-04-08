@@ -3,9 +3,9 @@
 package privacy
 
 /*
-#cgo CXXFLAGS: -std=c++17 -I/usr/local/include
-#cgo LDFLAGS: -lprivacy -lsodium -lstdc++ -L/usr/local/lib
-#include <privacy/encryption.h>
+#cgo CXXFLAGS: -std=c++17 -v
+#cgo LDFLAGS: -lprivacy -lsodium -lstdc++ -v
+#include "privacy/encryption.h"
 #include <stdlib.h>
 */
 import "C"

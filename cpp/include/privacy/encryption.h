@@ -1,10 +1,13 @@
 #ifndef SECURE_ORDER_H
 #define SECURE_ORDER_H
 
+#ifdef __cplusplus
 #include <cstddef>
 #include <cstdint>
+#else
 #include <stddef.h>
 #include <stdint.h>
+#endif
 
 // This ensures C++ compilers dont mangle names,
 // allowing Go compiler (CGO)

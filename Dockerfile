@@ -1,30 +1,38 @@
-# Multi-stage build - use latest golang image
-FROM golang:latest AS builder
+# Multi-stage build - Build C++ first, then Go
+FROM ubuntu:22.04 AS cpp-builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
+    pkg-config \
     libsodium-dev \
     ca-certificates && \
     rm -rf /var/cache/apt/lists/*
 
 WORKDIR /app
+COPY cpp/ /app/cpp/
+
+RUN cd /app/cpp && mkdir -p build && cd build && \
+    cmake .. && make install
+
+# Go builder stage
+FROM golang:latest AS go-builder
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libsodium-dev && \
+    rm -rf /var/cache/apt/lists/*
+
+WORKDIR /app
+COPY --from=cpp-builder /usr/local/lib/libprivacy.a /usr/local/lib/
+COPY --from=cpp-builder /usr/local/include/privacy /usr/local/include/privacy
 COPY . .
 
-# Fix go.mod
 RUN go mod tidy
 
-# Build C++ library
-RUN cd cpp && mkdir -p build && cd build && \
-    cmake .. && make install && cd ../..
-
-# Build Go binary
-RUN cd /app && \
-    CGO_ENABLED=1 \
-    CGO_CXXFLAGS="-std=c++17" \
-    CGO_LDFLAGS="-lprivacy -lsodium -lstdc++ -L/usr/local/lib" \
-    GOOS=linux \
-    LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH \
+RUN CGO_ENABLED=1 \
+    CGO_CXXFLAGS="-std=c++17 -I/usr/include/c++/11 -I/usr/local/include" \
+    CGO_LDFLAGS="-L/usr/local/lib -L/usr/lib -lprivacy -lsodium -lstdc++" \
     go build -o sequencer ./cmd/sequencer
 
 # Runtime stage - minimal image
@@ -36,13 +44,11 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/cache/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/sequencer /app/sequencer
-COPY --from=builder /usr/local/lib/libprivacy.a /app/lib/
+COPY --from=go-builder /app/sequencer /app/sequencer
+COPY --from=cpp-builder /usr/local/lib/libprivacy.a /app/lib/
 
-# Expose gRPC port
-EXPOSE 50051
-
-# Set library path
 ENV LD_LIBRARY_PATH=/app/lib
+
+EXPOSE 12345
 
 ENTRYPOINT ["/app/sequencer"]
