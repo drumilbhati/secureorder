@@ -2,29 +2,30 @@ package sequencing
 
 import (
 	"context"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
 // EncryptedTransaction holds an encrypted payload submitted by a client,
 // along with metadata assigned by the sequencer upon arrival.
 type EncryptedTransaction struct {
-	// ID is a monotonically increasing sequence number assigned at enqueue time.
+	// ID is a monotonically increasing tie-breaker assigned at admission time.
 	ID uint64
 
 	// Ciphertext is the raw NaCl sealed-box ciphertext produced by the client.
 	Ciphertext []byte
 
-	// ArrivedAt is the wall-clock time recorded when the transaction entered the queue.
+	// ArrivedAt is the sequencer-assigned timestamp recorded at admission time.
 	ArrivedAt time.Time
 }
 
 // TxQueue is a FIFO queue for encrypted transactions.
-// All concurrent submissions are serialised through a Go channel, so no
-// explicit mutex is required for the ordering invariant.
+// Concurrent submissions are serialized through a mutex so every accepted
+// transaction gets a total order defined by (ArrivedAt, ID).
 type TxQueue struct {
-	ch      chan EncryptedTransaction
-	counter atomic.Uint64
+	ch     chan EncryptedTransaction
+	nextID uint64
+	mu     sync.Mutex
 }
 
 // NewTxQueue creates a TxQueue with the given internal buffer capacity.
@@ -36,9 +37,9 @@ func NewTxQueue(capacity int) *TxQueue {
 	}
 }
 
-// Submit enqueues an encrypted transaction. It stamps the arrival time and
-// assigns the next sequence ID atomically, so submissions from multiple
-// goroutines are safe and produce a consistent FIFO order.
+// Submit enqueues an encrypted transaction. It stamps the sequencer arrival
+// time first and assigns a monotonically increasing ID to break timestamp ties,
+// so successful submissions produce a consistent total order.
 //
 // Submit blocks when the internal buffer is full. Pass a context with a
 // deadline or cancellation to bound the wait:
@@ -57,10 +58,14 @@ func (q *TxQueue) SubmitWithReceipt(ctx context.Context, ciphertext []byte) (Enc
 	payload := make([]byte, len(ciphertext))
 	copy(payload, ciphertext)
 
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	q.nextID++
 	tx := EncryptedTransaction{
-		ID:         q.counter.Add(1),
-		Ciphertext: payload,
 		ArrivedAt:  time.Now(),
+		ID:         q.nextID,
+		Ciphertext: payload,
 	}
 
 	select {

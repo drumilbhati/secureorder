@@ -3,8 +3,9 @@
 package privacy
 
 /*
+#cgo CPPFLAGS: -I${SRCDIR}/../../build_wrapper/include
 #cgo CXXFLAGS: -std=c++17 -v
-#cgo LDFLAGS: -lprivacy -lsodium -lstdc++ -v
+#cgo LDFLAGS: -L${SRCDIR}/../../cpp/build/lib -lprivacy -lsodium -lstdc++ -v
 #include "privacy/encryption.h"
 #include <stdlib.h>
 */
