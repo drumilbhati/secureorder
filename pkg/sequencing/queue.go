@@ -2,6 +2,7 @@ package sequencing
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -19,22 +20,42 @@ type EncryptedTransaction struct {
 	ArrivedAt time.Time
 }
 
+var ErrQueueClosed = errors.New("tx queue closed")
+
+type submitRequest struct {
+	ctx        context.Context
+	ciphertext []byte
+	resp       chan submitResponse
+}
+
+type submitResponse struct {
+	tx  EncryptedTransaction
+	err error
+}
+
 // TxQueue is a FIFO queue for encrypted transactions.
-// Concurrent submissions are serialized through a mutex so every accepted
-// transaction gets a total order defined by (ArrivedAt, ID).
+// A dedicated admission goroutine serializes successful submissions so every
+// accepted transaction gets a total order defined by (ArrivedAt, ID).
 type TxQueue struct {
-	ch     chan EncryptedTransaction
-	nextID uint64
-	mu     sync.Mutex
+	ch       chan EncryptedTransaction
+	submitCh chan submitRequest
+	done     chan struct{}
+
+	closeOnce sync.Once
+	nextID    uint64
 }
 
 // NewTxQueue creates a TxQueue with the given internal buffer capacity.
 // capacity controls how many transactions can be buffered before Submit blocks.
 // A capacity of 0 creates an unbuffered (synchronous) queue.
 func NewTxQueue(capacity int) *TxQueue {
-	return &TxQueue{
-		ch: make(chan EncryptedTransaction, capacity),
+	q := &TxQueue{
+		ch:       make(chan EncryptedTransaction, capacity),
+		submitCh: make(chan submitRequest, capacity),
+		done:     make(chan struct{}),
 	}
+	go q.runAdmissionLoop()
+	return q
 }
 
 // Submit enqueues an encrypted transaction. It stamps the sequencer arrival
@@ -53,24 +74,29 @@ func (q *TxQueue) Submit(ctx context.Context, ciphertext []byte) error {
 // SubmitWithReceipt enqueues a transaction and returns the assigned sequence
 // metadata, allowing callers to create proof-of-reception commitments at ingress.
 func (q *TxQueue) SubmitWithReceipt(ctx context.Context, ciphertext []byte) (EncryptedTransaction, error) {
-	// Copy the slice so the queue owns the data regardless of what the
-	// caller does with their buffer afterwards.
+	// Copy the slice so the queue owns the data regardless of what the caller does with their buffer afterwards.
 	payload := make([]byte, len(ciphertext))
 	copy(payload, ciphertext)
 
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	q.nextID++
-	tx := EncryptedTransaction{
-		ArrivedAt:  time.Now(),
-		ID:         q.nextID,
-		Ciphertext: payload,
+	req := submitRequest{
+		ctx:        ctx,
+		ciphertext: payload,
+		resp:       make(chan submitResponse, 1),
 	}
 
 	select {
-	case q.ch <- tx:
-		return tx, nil
+	case q.submitCh <- req:
+	case <-q.done:
+		return EncryptedTransaction{}, ErrQueueClosed
+	case <-ctx.Done():
+		return EncryptedTransaction{}, ctx.Err()
+	}
+
+	select {
+	case resp := <-req.resp:
+		return resp.tx, resp.err
+	case <-q.done:
+		return EncryptedTransaction{}, ErrQueueClosed
 	case <-ctx.Done():
 		return EncryptedTransaction{}, ctx.Err()
 	}
@@ -86,7 +112,10 @@ func (q *TxQueue) Drain(maxBatch int) []EncryptedTransaction {
 	batch := make([]EncryptedTransaction, 0, maxBatch)
 	for len(batch) < maxBatch {
 		select {
-		case tx := <-q.ch:
+		case tx, ok := <-q.ch:
+			if !ok {
+				return batch
+			}
 			batch = append(batch, tx)
 		default:
 			return batch
@@ -105,7 +134,10 @@ func (q *TxQueue) DrainWait(ctx context.Context, batchSize int) ([]EncryptedTran
 	batch := make([]EncryptedTransaction, 0, batchSize)
 	for len(batch) < batchSize {
 		select {
-		case tx := <-q.ch:
+		case tx, ok := <-q.ch:
+			if !ok {
+				return batch, ErrQueueClosed
+			}
 			batch = append(batch, tx)
 		case <-ctx.Done():
 			return batch, ctx.Err()
@@ -120,10 +152,63 @@ func (q *TxQueue) Len() int {
 	return len(q.ch)
 }
 
-// Close signals that no further transactions will be submitted. Any goroutine
-// blocked in DrainWait will receive the remaining buffered transactions and
-// then get a closed-channel read, so callers should check for the zero value.
-// Calling Close more than once panics (same as closing a Go channel twice).
+func (q *TxQueue) runAdmissionLoop() {
+	for {
+		select {
+		case <-q.done:
+			q.rejectPendingSubmissions()
+			close(q.ch)
+			return
+		case req := <-q.submitCh:
+			select {
+			case <-req.ctx.Done():
+				req.resp <- submitResponse{err: req.ctx.Err()}
+				continue
+			case <-q.done:
+				req.resp <- submitResponse{err: ErrQueueClosed}
+				q.rejectPendingSubmissions()
+				close(q.ch)
+				return
+			default:
+			}
+
+			q.nextID++
+			tx := EncryptedTransaction{
+				ArrivedAt:  time.Now(),
+				ID:         q.nextID,
+				Ciphertext: req.ciphertext,
+			}
+
+			select {
+			case q.ch <- tx:
+				req.resp <- submitResponse{tx: tx}
+			case <-req.ctx.Done():
+				req.resp <- submitResponse{err: req.ctx.Err()}
+			case <-q.done:
+				req.resp <- submitResponse{err: ErrQueueClosed}
+				q.rejectPendingSubmissions()
+				close(q.ch)
+				return
+			}
+		}
+	}
+}
+
+func (q *TxQueue) rejectPendingSubmissions() {
+	for {
+		select {
+		case req := <-q.submitCh:
+			req.resp <- submitResponse{err: ErrQueueClosed}
+		default:
+			return
+		}
+	}
+}
+
+// Close signals that no further transactions will be submitted and eventually
+// closes the internal transaction channel after pending submissions are rejected.
 func (q *TxQueue) Close() {
-	close(q.ch)
+	q.closeOnce.Do(func() {
+		close(q.done)
+	})
 }
