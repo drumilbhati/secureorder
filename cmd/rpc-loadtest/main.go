@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/drumilbhati/secureorder/pkg/privacy"
 	pb "github.com/drumilbhati/secureorder/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -16,10 +17,20 @@ import (
 
 func main() {
 	addr := flag.String("addr", "localhost:12345", "gRPC sequencer address")
+	pubKeyPath := flag.String("pubkey", "keys/sequencer_public.key", "path to sequencer public key")
 	clients := flag.Int("clients", 1000, "number of concurrent clients")
 	requestsPerClient := flag.Int("requests", 1, "requests per client")
 	timeout := flag.Duration("timeout", 20*time.Second, "overall timeout")
 	flag.Parse()
+
+	if err := privacy.Init(); err != nil {
+		log.Fatalf("privacy init failed: %v", err)
+	}
+
+	pubKey, err := privacy.LoadKeyFromFile(*pubKeyPath, privacy.PublicKeyBytes)
+	if err != nil {
+		log.Fatalf("failed to load sequencer public key: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -44,8 +55,14 @@ func main() {
 
 			client := pb.NewRPCServiceClient(conn)
 			for j := 0; j < *requestsPerClient; j++ {
-				payload := []byte(fmt.Sprintf("loadtest-client-%d-req-%d", clientID, j))
-				resp, err := client.SubmitTx(ctx, &pb.SubmitRequest{Ciphertext: payload})
+				payload := []byte(fmt.Sprintf("loadtest-client-%d-req-%d-%d", clientID, j, time.Now().UnixNano()))
+				ciphertext, err := privacy.SealTransaction(payload, pubKey)
+				if err != nil {
+					failed.Add(1)
+					continue
+				}
+
+				resp, err := client.SubmitTx(ctx, &pb.SubmitRequest{Ciphertext: ciphertext})
 				if err != nil || !resp.Accepted {
 					failed.Add(1)
 					continue
@@ -68,6 +85,7 @@ func main() {
 	fmt.Println("   SECUREORDER RPC LOAD TEST SUMMARY    ")
 	fmt.Println("========================================")
 	fmt.Printf("Address            : %s\n", *addr)
+	fmt.Printf("Public key         : %s\n", *pubKeyPath)
 	fmt.Printf("Concurrent clients : %d\n", *clients)
 	fmt.Printf("Requests/client    : %d\n", *requestsPerClient)
 	fmt.Printf("Total requests     : %d\n", total)

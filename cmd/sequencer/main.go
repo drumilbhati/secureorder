@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,77 @@ import (
 	"github.com/drumilbhati/secureorder/pkg/sequencing"
 	"google.golang.org/grpc"
 )
+
+func parseRaftPeers(spec string) ([]sequencing.RaftPeer, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(spec, ",")
+	peers := make([]sequencing.RaftPeer, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		fields := strings.SplitN(part, "=", 2)
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("invalid raft peer %q, expected nodeID=host:port", part)
+		}
+
+		peers = append(peers, sequencing.RaftPeer{
+			ID:      strings.TrimSpace(fields[0]),
+			Address: strings.TrimSpace(fields[1]),
+		})
+	}
+
+	return peers, nil
+}
+
+func newOrderedLog(orderingMode, raftNodeID, raftBind, raftPeers string, raftBootstrap bool) (sequencing.OrderedLog, error) {
+	switch orderingMode {
+	case "local":
+		return sequencing.NewTxQueue(100), nil
+	case "raft":
+		peers, err := parseRaftPeers(raftPeers)
+		if err != nil {
+			return nil, err
+		}
+
+		return sequencing.NewRaftOrderedLog(sequencing.RaftOrderedLogConfig{
+			NodeID:      raftNodeID,
+			BindAddress: raftBind,
+			Bootstrap:   raftBootstrap,
+			Peers:       peers,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported ordering mode %q", orderingMode)
+	}
+}
+
+func logStartupConfiguration(orderingMode, grpcAddr, raftNodeID, raftBind string, raftBootstrap bool, peers []sequencing.RaftPeer) {
+	fmt.Printf("Ordering backend: %s\n", orderingMode)
+	fmt.Printf("gRPC bind: %s\n", grpcAddr)
+
+	if orderingMode != "raft" {
+		return
+	}
+
+	fmt.Printf("Raft node ID: %s\n", raftNodeID)
+	fmt.Printf("Raft bind: %s\n", raftBind)
+	fmt.Printf("Raft bootstrap: %v\n", raftBootstrap)
+	if len(peers) == 0 {
+		fmt.Println("Raft peers: none configured")
+		return
+	}
+
+	fmt.Println("Raft peers:")
+	for _, peer := range peers {
+		fmt.Printf("  - %s=%s\n", peer.ID, peer.Address)
+	}
+}
 
 func loadOrCreateSequencerKeys() ([]byte, []byte, error) {
 	if err := os.MkdirAll("keys", 0o700); err != nil {
@@ -46,6 +119,14 @@ func loadOrCreateSequencerKeys() ([]byte, []byte, error) {
 }
 
 func main() {
+	orderingMode := flag.String("ordering", "local", "ordering backend: local or raft")
+	grpcAddr := flag.String("grpc-addr", ":12345", "client-facing gRPC bind address")
+	raftNodeID := flag.String("raft-node-id", "node-1", "Raft node ID")
+	raftBind := flag.String("raft-bind", "127.0.0.1:7000", "Raft bind address")
+	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap a new Raft cluster on this node")
+	raftPeers := flag.String("raft-peers", "", "comma-separated raft peers as nodeID=host:port")
+	flag.Parse()
+
 	if err := privacy.Init(); err != nil {
 		log.Fatalf("privacy init failed: %v", err)
 	}
@@ -55,9 +136,18 @@ func main() {
 		log.Fatalf("sequencer key setup failed: %v", err)
 	}
 
-	fmt.Println("Sequencer keys ready in keys/")
+	peers, err := parseRaftPeers(*raftPeers)
+	if err != nil {
+		log.Fatalf("invalid raft peer configuration: %v", err)
+	}
 
-	orderedLog := sequencing.NewTxQueue(100)
+	fmt.Println("Sequencer keys ready in keys/")
+	logStartupConfiguration(*orderingMode, *grpcAddr, *raftNodeID, *raftBind, *raftBootstrap, peers)
+
+	orderedLog, err := newOrderedLog(*orderingMode, *raftNodeID, *raftBind, *raftPeers, *raftBootstrap)
+	if err != nil {
+		log.Fatalf("failed to initialize ordering backend: %v", err)
+	}
 	mempool := sequencing.NewEncryptedMempool(1024)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +210,7 @@ func main() {
 	rpcServer := rpc.NewServer(orderedLog)
 	rpc.Register(grpcServer, rpcServer)
 
-	lis, err := net.Listen("tcp", ":12345")
+	lis, err := net.Listen("tcp", *grpcAddr)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
