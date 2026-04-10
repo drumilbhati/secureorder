@@ -13,26 +13,26 @@ import (
 
 type Server struct {
 	pb.UnimplementedRPCServiceServer
-	queue     *sequencing.TxQueue
+	log       sequencing.OrderedLog
 	proofs    *sequencing.ReceptionStore
 	publisher settlement.CommitmentPublisher
 }
 
-func NewServer(queue *sequencing.TxQueue) *Server {
+func NewServer(log sequencing.OrderedLog) *Server {
 	publisher, err := settlement.NewPublisherFromEnv()
 	if err != nil {
 		publisher = settlement.NoopPublisher{}
 	}
 
 	return &Server{
-		queue:     queue,
+		log:       log,
 		proofs:    sequencing.NewReceptionStore(),
 		publisher: publisher,
 	}
 }
 
 func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitAck, error) {
-	tx, err := s.queue.SubmitWithReceipt(ctx, req.Ciphertext)
+	tx, err := s.log.SubmitWithReceipt(ctx, req.Ciphertext)
 	if err != nil {
 		return &pb.SubmitAck{Accepted: false}, fmt.Errorf("failed to submit transaction: %w", err)
 	}
@@ -61,14 +61,14 @@ func Register(s *grpc.Server, srv pb.RPCServiceServer) {
 
 // Start starts the gRPC server on the given address.
 // Example address: ":50051"
-func Start(address string, queue *sequencing.TxQueue) error {
+func Start(address string, log sequencing.OrderedLog) error {
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
 	server := grpc.NewServer()
-	rpcServer := NewServer(queue)
+	rpcServer := NewServer(log)
 	pb.RegisterRPCServiceServer(server, rpcServer)
 
 	fmt.Printf("gRPC server listening on %s\n", address)

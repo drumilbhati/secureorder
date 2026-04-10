@@ -57,7 +57,7 @@ func main() {
 
 	fmt.Println("Sequencer keys ready in keys/")
 
-	queue := sequencing.NewTxQueue(100)
+	orderedLog := sequencing.NewTxQueue(100)
 	mempool := sequencing.NewEncryptedMempool(1024)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +65,7 @@ func main() {
 	go func() {
 		// Ingress collector: keep transactions encrypted in mempool until reveal.
 		for {
-			txs, err := queue.DrainWait(ctx, 1)
+			txs, err := orderedLog.DrainWait(ctx, 1)
 			if err != nil {
 				return
 			}
@@ -117,7 +117,7 @@ func main() {
 	}()
 
 	grpcServer := grpc.NewServer()
-	rpcServer := rpc.NewServer(queue)
+	rpcServer := rpc.NewServer(orderedLog)
 	rpc.Register(grpcServer, rpcServer)
 
 	lis, err := net.Listen("tcp", ":12345")
@@ -139,6 +139,6 @@ func main() {
 	fmt.Println("Shutting down...")
 	cancel()
 	grpcServer.GracefulStop()
-	queue.Close()
+	orderedLog.Close()
 	fmt.Println("Server stopped")
 }

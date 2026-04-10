@@ -2,12 +2,27 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/drumilbhati/secureorder/pkg/sequencing"
 	pb "github.com/drumilbhati/secureorder/proto"
 )
+
+type stubOrderedLog struct {
+	submit func(ctx context.Context, ciphertext []byte) (sequencing.EncryptedTransaction, error)
+}
+
+func (s stubOrderedLog) SubmitWithReceipt(ctx context.Context, ciphertext []byte) (sequencing.EncryptedTransaction, error) {
+	return s.submit(ctx, ciphertext)
+}
+
+func (stubOrderedLog) DrainWait(context.Context, int) ([]sequencing.EncryptedTransaction, error) {
+	return nil, nil
+}
+
+func (stubOrderedLog) Close() {}
 
 func TestSubmitTx_Success(t *testing.T) {
 	queue := sequencing.NewTxQueue(10)
@@ -64,6 +79,50 @@ func TestSubmitTx_ContextCancelled(t *testing.T) {
 	}
 	if ack.Accepted {
 		t.Error("expected accepted=false on error, got true")
+	}
+}
+
+func TestSubmitTx_UsesOrderedLogAbstraction(t *testing.T) {
+	expected := sequencing.EncryptedTransaction{
+		ID:         42,
+		Ciphertext: []byte("via-stub"),
+		ArrivedAt:  time.Unix(1700000000, 99),
+	}
+
+	server := NewServer(stubOrderedLog{
+		submit: func(ctx context.Context, ciphertext []byte) (sequencing.EncryptedTransaction, error) {
+			if string(ciphertext) != "via-stub" {
+				t.Fatalf("unexpected ciphertext %q", string(ciphertext))
+			}
+			return expected, nil
+		},
+	})
+
+	ack, err := server.SubmitTx(context.Background(), &pb.SubmitRequest{Ciphertext: []byte("via-stub")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ack.Accepted {
+		t.Fatal("expected accepted=true")
+	}
+	if server.ProofCount() != 1 {
+		t.Fatalf("expected 1 reception proof, got %d", server.ProofCount())
+	}
+}
+
+func TestSubmitTx_PropagatesOrderedLogError(t *testing.T) {
+	server := NewServer(stubOrderedLog{
+		submit: func(context.Context, []byte) (sequencing.EncryptedTransaction, error) {
+			return sequencing.EncryptedTransaction{}, errors.New("proposal failed")
+		},
+	})
+
+	ack, err := server.SubmitTx(context.Background(), &pb.SubmitRequest{Ciphertext: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if ack.Accepted {
+		t.Fatal("expected accepted=false")
 	}
 }
 
