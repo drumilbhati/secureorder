@@ -19,7 +19,7 @@ Secure-Order is a modular FIFO-based sequencing layer that eliminates MEV exploi
 
 ## Architecture
 ```
-Users → Privacy Layer (C++) → Sequencing Engine (Go) → Mock DEX
+Users → Privacy Layer (C++) → Sequencer Cluster (Raft/Go) → Mock DEX
                 ↓
         Order Commitment (Smart Contract)
 ```
@@ -120,10 +120,16 @@ This demonstrates how the real system works with a long-running server and multi
 
 #### Step 1: Start the Sequencer Server
 
-**Terminal 1 - Sequencer:**
+**Terminal 1 - Sequencer (Local Mode):**
 ```bash
 export LD_LIBRARY_PATH="./cpp/build:$LD_LIBRARY_PATH"
-./bin/sequencer
+./bin/sequencer --ordering=local
+```
+
+**Terminal 1 - Sequencer (Distributed Raft Mode):**
+```bash
+export LD_LIBRARY_PATH="./cpp/build:$LD_LIBRARY_PATH"
+./bin/sequencer --ordering=raft --raft-node-id=node-1 --raft-bind=127.0.0.1:7000 --raft-bootstrap=true
 ```
 
 **Expected Output (Continuous Logs):**
@@ -339,7 +345,11 @@ client confirmed
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| **Port** | 12345 | gRPC server port |
+| **Port** | 12345 | gRPC server port (`--grpc-addr`) |
+| **Ordering Mode**| `local` | `local` (in-memory) or `raft` (distributed) |
+| **Raft Node ID**| `node-1` | ID for the Raft node (`--raft-node-id`) |
+| **Raft Bind** | `127.0.0.1:7000` | Address for Raft communication (`--raft-bind`) |
+| **Raft Peers** | (empty) | Comma-separated peers (`--raft-peers=node2=ip:port,...`) |
 | **Queue Capacity** | 100 | Max transactions in queue |
 | **Batch Size** | 10 | Transactions per batch reveal |
 | **Reveal Interval** | 300ms | Batch processing frequency |
