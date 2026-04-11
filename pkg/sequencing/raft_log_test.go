@@ -11,6 +11,7 @@ func TestRaftOrderedLogSingleNodeCommit(t *testing.T) {
 		NodeID:      "node-1",
 		BindAddress: "127.0.0.1:0",
 		Bootstrap:   true,
+		DataDir:     t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("NewRaftOrderedLog: %v", err)

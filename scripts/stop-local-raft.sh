@@ -20,6 +20,7 @@ stop_pid_file() {
   pid="$(cat "$pid_file")"
   if kill -0 "$pid" >/dev/null 2>&1; then
     kill "$pid"
+    wait "$pid" 2>/dev/null || true
     echo "Stopped ${node_name} pid=${pid}"
   else
     echo "${node_name} was not running"

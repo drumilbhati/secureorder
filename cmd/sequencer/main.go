@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -46,7 +47,11 @@ func parseRaftPeers(spec string) ([]sequencing.RaftPeer, error) {
 	return peers, nil
 }
 
-func newOrderedLog(orderingMode, raftNodeID, raftBind, raftPeers string, raftBootstrap bool) (sequencing.OrderedLog, error) {
+func defaultRaftDataDir(raftNodeID string) string {
+	return filepath.Join(".local", "raft", "data", raftNodeID)
+}
+
+func newOrderedLog(orderingMode, raftNodeID, raftBind, raftPeers, raftDataDir string, raftBootstrap bool) (sequencing.OrderedLog, error) {
 	switch orderingMode {
 	case "local":
 		return sequencing.NewTxQueue(100), nil
@@ -61,13 +66,14 @@ func newOrderedLog(orderingMode, raftNodeID, raftBind, raftPeers string, raftBoo
 			BindAddress: raftBind,
 			Bootstrap:   raftBootstrap,
 			Peers:       peers,
+			DataDir:     raftDataDir,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported ordering mode %q", orderingMode)
 	}
 }
 
-func logStartupConfiguration(orderingMode, grpcAddr, raftNodeID, raftBind string, raftBootstrap bool, peers []sequencing.RaftPeer) {
+func logStartupConfiguration(orderingMode, grpcAddr, raftNodeID, raftBind, raftDataDir string, raftBootstrap bool, peers []sequencing.RaftPeer) {
 	fmt.Printf("Ordering backend: %s\n", orderingMode)
 	fmt.Printf("gRPC bind: %s\n", grpcAddr)
 
@@ -77,6 +83,7 @@ func logStartupConfiguration(orderingMode, grpcAddr, raftNodeID, raftBind string
 
 	fmt.Printf("Raft node ID: %s\n", raftNodeID)
 	fmt.Printf("Raft bind: %s\n", raftBind)
+	fmt.Printf("Raft data dir: %s\n", raftDataDir)
 	fmt.Printf("Raft bootstrap: %v\n", raftBootstrap)
 	if len(peers) == 0 {
 		fmt.Println("Raft peers: none configured")
@@ -123,6 +130,7 @@ func main() {
 	grpcAddr := flag.String("grpc-addr", ":12345", "client-facing gRPC bind address")
 	raftNodeID := flag.String("raft-node-id", "node-1", "Raft node ID")
 	raftBind := flag.String("raft-bind", "127.0.0.1:7000", "Raft bind address")
+	raftDataDir := flag.String("raft-data-dir", "", "Raft data directory for persistent state")
 	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap a new Raft cluster on this node")
 	raftPeers := flag.String("raft-peers", "", "comma-separated raft peers as nodeID=host:port")
 	flag.Parse()
@@ -141,10 +149,14 @@ func main() {
 		log.Fatalf("invalid raft peer configuration: %v", err)
 	}
 
-	fmt.Println("Sequencer keys ready in keys/")
-	logStartupConfiguration(*orderingMode, *grpcAddr, *raftNodeID, *raftBind, *raftBootstrap, peers)
+	if *raftDataDir == "" {
+		*raftDataDir = defaultRaftDataDir(*raftNodeID)
+	}
 
-	orderedLog, err := newOrderedLog(*orderingMode, *raftNodeID, *raftBind, *raftPeers, *raftBootstrap)
+	fmt.Println("Sequencer keys ready in keys/")
+	logStartupConfiguration(*orderingMode, *grpcAddr, *raftNodeID, *raftBind, *raftDataDir, *raftBootstrap, peers)
+
+	orderedLog, err := newOrderedLog(*orderingMode, *raftNodeID, *raftBind, *raftPeers, *raftDataDir, *raftBootstrap)
 	if err != nil {
 		log.Fatalf("failed to initialize ordering backend: %v", err)
 	}

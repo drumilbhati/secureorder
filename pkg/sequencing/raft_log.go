@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 )
 
 const defaultRaftApplyTimeout = 10 * time.Second
@@ -27,6 +30,7 @@ type RaftOrderedLogConfig struct {
 	Bootstrap    bool
 	Peers        []RaftPeer
 	CommitBuffer int
+	DataDir      string
 }
 
 type raftProposal struct {
@@ -35,9 +39,6 @@ type raftProposal struct {
 }
 
 // RaftOrderedLog backs OrderedLog with a hashicorp/raft replicated log.
-//
-// This initial implementation uses in-memory Raft stores. It gives the project
-// decentralized ordering and leader election, but not durable recovery yet.
 type RaftOrderedLog struct {
 	raft      *raft.Raft
 	transport *raft.NetworkTransport
@@ -55,6 +56,9 @@ func NewRaftOrderedLog(cfg RaftOrderedLogConfig) (*RaftOrderedLog, error) {
 	}
 	if strings.TrimSpace(cfg.BindAddress) == "" {
 		return nil, errors.New("raft bind address is required")
+	}
+	if strings.TrimSpace(cfg.DataDir) == "" {
+		return nil, errors.New("raft data directory is required")
 	}
 	if cfg.CommitBuffer <= 0 {
 		cfg.CommitBuffer = 1024
@@ -81,9 +85,32 @@ func NewRaftOrderedLog(cfg RaftOrderedLogConfig) (*RaftOrderedLog, error) {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.LocalID = raft.ServerID(cfg.NodeID)
 
-	logStore := raft.NewInmemStore()
-	stableStore := raft.NewInmemStore()
-	snapshotStore := raft.NewInmemSnapshotStore()
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		_ = transport.Close()
+		return nil, fmt.Errorf("create raft data dir: %w", err)
+	}
+
+	logStorePath := filepath.Join(cfg.DataDir, "raft-log.bolt")
+	stableStorePath := filepath.Join(cfg.DataDir, "raft-stable.bolt")
+	snapshotDir := filepath.Join(cfg.DataDir, "snapshots")
+
+	logStore, err := raftboltdb.NewBoltStore(logStorePath)
+	if err != nil {
+		_ = transport.Close()
+		return nil, fmt.Errorf("create raft log store: %w", err)
+	}
+
+	stableStore, err := raftboltdb.NewBoltStore(stableStorePath)
+	if err != nil {
+		_ = transport.Close()
+		return nil, fmt.Errorf("create raft stable store: %w", err)
+	}
+
+	snapshotStore, err := raft.NewFileSnapshotStore(snapshotDir, 2, os.Stderr)
+	if err != nil {
+		_ = transport.Close()
+		return nil, fmt.Errorf("create raft snapshot store: %w", err)
+	}
 
 	node, err := raft.NewRaft(raftConfig, fsm, logStore, stableStore, snapshotStore, transport)
 	if err != nil {
