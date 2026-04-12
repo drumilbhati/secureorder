@@ -124,7 +124,79 @@ To stop all running components (Sequencers and EVM):
 | `LD_LIBRARY_PATH` | Path to C++ libraries | `./cpp/build/lib` |
 
 ---
-**Deployment Troubleshooting:**
-- **Shared Library Error**: Ensure `LD_LIBRARY_PATH` is exported.
-- **Port Conflict**: Check for running processes on 12345-12349 or 8545 using `lsof -i :<port>`.
-- **Raft Election Failure**: Ensure at least 3 nodes out of 5 are running.
+
+## ☁️ Phase 6: Multi-Node AWS Deployment (Production-like)
+
+To deploy a 5-node Raft cluster across different AWS EC2 instances, follow these detailed steps.
+
+### 1. Infrastructure Setup (VPC)
+Before launching instances, create a network environment:
+1.  **Open VPC Console**: Search for "VPC" in the AWS Management Console.
+2.  **Run Wizard**: Click **Create VPC** and select **"VPC and more"**.
+    - **Name**: `secure-order-vpc`
+    - **AZs**: `1`
+    - **Public Subnets**: `1`
+    - **Private Subnets**: `0`
+    - Click **Create VPC**.
+3.  **Enable Public IPs**: Go to **Subnets**, select your public subnet, click **Actions > Edit subnet settings**, and check **Enable auto-assign public IPv4 address**.
+
+### 2. Configure Security Groups
+Create a Security Group named `secure-order-sg` in your new VPC:
+- **Inbound Rules**:
+  - **SSH (22)**: From your IP.
+  - **Custom TCP (7000)**: From `secure-order-sg` (This allows nodes to talk to each other).
+  - **Custom TCP (12345)**: From `0.0.0.0/0` (Allows clients to connect).
+
+### 3. Provision EC2 Instances
+- **Count**: 5 Instances (e.g., `t3.medium`).
+- **Network**: Select `secure-order-vpc` and the public subnet.
+- **Security Group**: Select `secure-order-sg`.
+- **OS**: Ubuntu 22.04 LTS.
+
+### 4. Install Dependencies on All Nodes
+Run this on every instance:
+```bash
+sudo apt update && sudo apt install -y build-essential cmake libsodium-dev pkg-config golang-go
+```
+
+### 4. Build and Prepare Binaries
+1. Clone the repo and build the C++ layer on **every node** (see Phase 1).
+2. Build the Go binaries using `./scripts/build-local.sh`.
+
+### 5. Synchronize Sequencer Keys (Critical)
+The cluster **must** share the same keypair.
+1. On **Node 1**, run `./bin/sequencer` once to generate `keys/`.
+2. Stop the process.
+3. Copy the `keys/` directory from Node 1 to all other nodes using SCP:
+   ```bash
+   scp -r ./keys/ ubuntu@<NODE_IP>:/home/ubuntu/secureorder/
+   ```
+
+### 6. Initialize the Cluster
+Note the Private IPs of your 5 nodes. Let's assume:
+`10.0.0.1 (N1), 10.0.0.2 (N2), 10.0.0.3 (N3), 10.0.0.4 (N4), 10.0.0.5 (N5)`
+
+**Define the Peer List (Same on all nodes):**
+```bash
+export PEERS="node-1=10.0.0.1:7000,node-2=10.0.0.2:7000,node-3=10.0.0.3:7000,node-4=10.0.0.4:7000,node-5=10.0.0.5:7000"
+export LD_LIBRARY_PATH="$PWD/cpp/build/lib:$LD_LIBRARY_PATH"
+```
+
+**Run Node 1 (Bootstrap):**
+```bash
+./bin/sequencer -ordering=raft -raft-node-id=node-1 -raft-bind=10.0.0.1:7000 -raft-peers=$PEERS -raft-bootstrap=true
+```
+
+**Run Nodes 2-5 (Joiners):**
+*Repeat on each node, changing the ID and bind IP.*
+```bash
+# Example for Node 2
+./bin/sequencer -ordering=raft -raft-node-id=node-2 -raft-bind=10.0.0.2:7000 -raft-peers=$PEERS
+```
+
+### 7. Client Connection from External Machine
+Clients should target the **Elastic IP** (Public IP) of the current leader on port `12345`.
+```bash
+./bin/client -addr=<LEADER_PUBLIC_IP>:12345
+```
+

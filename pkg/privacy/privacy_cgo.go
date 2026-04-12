@@ -105,8 +105,8 @@ func SealTransaction(plaintext []byte, sequencerPubKey []byte) ([]byte, error) {
 }
 
 func DecryptSingle(ciphertext []byte, pubKey []byte, secKey []byte) ([]byte, error) {
-	if len(ciphertext) < SealBytes {
-		return nil, errors.New("ciphertext too short")
+	if len(ciphertext) <= SealBytes {
+		return nil, fmt.Errorf("ciphertext too short")
 	}
 	if len(pubKey) != PublicKeyBytes {
 		return nil, fmt.Errorf("public key must be %d bytes", PublicKeyBytes)
@@ -115,28 +115,42 @@ func DecryptSingle(ciphertext []byte, pubKey []byte, secKey []byte) ([]byte, err
 		return nil, fmt.Errorf("secret key must be %d bytes", SecretKeyBytes)
 	}
 
-	plaintext := make([]byte, len(ciphertext)-SealBytes)
+	// Safely copy data to C-allocated memory to satisfy CGO pointer rules
+	cCiphertext := C.CBytes(ciphertext)
+	defer C.free(cCiphertext)
+
+	cPubKey := C.CBytes(pubKey)
+	defer C.free(cPubKey)
+
+	cSecKey := C.CBytes(secKey)
+	defer C.free(cSecKey)
+
+	plaintextLen := len(ciphertext) - SealBytes
+	cPlaintext := C.malloc(C.size_t(plaintextLen))
+	defer C.free(cPlaintext)
 
 	enc := C.EncryptedTx{
-		ciphertext: (*C.uint8_t)(unsafe.Pointer(&ciphertext[0])),
+		ciphertext: (*C.uint8_t)(cCiphertext),
 		length:     C.size_t(len(ciphertext)),
 	}
 	dec := C.DecryptedTx{
-		plaintext: (*C.uint8_t)(unsafe.Pointer(&plaintext[0])),
+		plaintext: (*C.uint8_t)(cPlaintext),
 		length:    0,
 		status:    0,
 	}
 
 	ret := int(C.decrypt_single_tx(
 		&enc,
-		(*C.uint8_t)(unsafe.Pointer(&pubKey[0])),
-		(*C.uint8_t)(unsafe.Pointer(&secKey[0])),
+		(*C.uint8_t)(cPubKey),
+		(*C.uint8_t)(cSecKey),
 		&dec,
 	))
+
 	if ret != 0 || int(dec.status) != 0 {
 		return nil, fmt.Errorf("decrypt_single_tx failed: ret=%d status=%d", ret, int(dec.status))
 	}
-	return plaintext[:int(dec.length)], nil
+
+	return C.GoBytes(cPlaintext, C.int(dec.length)), nil
 }
 
 func DecryptBatch(ciphertexts [][]byte, pubKey []byte, secKey []byte) ([][]byte, error) {
@@ -209,11 +223,16 @@ func DecryptBatch(ciphertexts [][]byte, pubKey []byte, secKey []byte) ([][]byte,
 		}
 	}()
 
+	cPubKey := C.CBytes(pubKey)
+	defer C.free(cPubKey)
+	cSecKey := C.CBytes(secKey)
+	defer C.free(cSecKey)
+
 	ret := int(C.decrypt_batch_tx(
 		(*C.EncryptedTx)(encMem),
 		C.size_t(n),
-		(*C.uint8_t)(unsafe.Pointer(&pubKey[0])),
-		(*C.uint8_t)(unsafe.Pointer(&secKey[0])),
+		(*C.uint8_t)(cPubKey),
+		(*C.uint8_t)(cSecKey),
 		(*C.DecryptedTx)(decMem),
 	))
 
