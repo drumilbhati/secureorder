@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/drumilbhati/secureorder/internal/settlement"
 	"github.com/drumilbhati/secureorder/pkg/sequencing"
@@ -16,6 +17,7 @@ type Server struct {
 	log       sequencing.OrderedLog
 	proofs    *sequencing.ReceptionStore
 	publisher settlement.CommitmentPublisher
+	done      chan struct{}
 }
 
 func NewServer(log sequencing.OrderedLog) *Server {
@@ -24,11 +26,52 @@ func NewServer(log sequencing.OrderedLog) *Server {
 		publisher = settlement.NoopPublisher{}
 	}
 
-	return &Server{
+	s := &Server{
 		log:       log,
 		proofs:    sequencing.NewReceptionStore(),
 		publisher: publisher,
+		done:      make(chan struct{}),
 	}
+
+	go s.runSettlementLoop()
+
+	return s
+}
+
+func (s *Server) runSettlementLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastPublishedCommitment string
+
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			last, ok := s.proofs.Last()
+			if !ok {
+				continue
+			}
+
+			if last.Commitment == lastPublishedCommitment {
+				continue
+			}
+
+			// Perform asynchronous settlement of the latest batch commitment
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if err := s.publisher.PublishCommitment(ctx, last.Commitment); err != nil {
+				fmt.Printf("failed to publish background commitment: %v\n", err)
+			} else {
+				lastPublishedCommitment = last.Commitment
+			}
+			cancel()
+		}
+	}
+}
+
+func (s *Server) Close() {
+	close(s.done)
 }
 
 func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitAck, error) {
@@ -42,10 +85,6 @@ func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.Submi
 		ArrivedUnix: tx.ArrivedAt.UnixNano(),
 		Commitment:  sequencing.GenerateReceptionCommitment(tx),
 	})
-
-	if last, ok := s.proofs.Last(); ok {
-		_ = s.publisher.PublishCommitment(ctx, last.Commitment)
-	}
 
 	return &pb.SubmitAck{Accepted: true}, nil
 }

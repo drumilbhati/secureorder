@@ -240,6 +240,7 @@ func main() {
 
 	fmt.Println("Shutting down...")
 	cancel()
+	rpcServer.Close()
 	grpcServer.GracefulStop()
 	orderedLog.Close()
 	fmt.Println("Server stopped")
