@@ -204,6 +204,18 @@ func (r *RaftOrderedLog) SubmitWithReceipt(ctx context.Context, ciphertext []byt
 	return tx, nil
 }
 
+func (r *RaftOrderedLog) IsLeader() bool {
+	return r.raft.State() == raft.Leader
+}
+
+func (r *RaftOrderedLog) StepDown() error {
+	if !r.IsLeader() {
+		return nil
+	}
+	fmt.Println("Leader lease expired, stepping down...")
+	return r.raft.LeadershipTransfer().Error()
+}
+
 func (r *RaftOrderedLog) DrainWait(ctx context.Context, batchSize int) ([]EncryptedTransaction, error) {
 	if batchSize <= 0 {
 		return nil, nil

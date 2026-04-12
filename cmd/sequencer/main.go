@@ -133,6 +133,7 @@ func main() {
 	raftDataDir := flag.String("raft-data-dir", "", "Raft data directory for persistent state")
 	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap a new Raft cluster on this node")
 	raftPeers := flag.String("raft-peers", "", "comma-separated raft peers as nodeID=host:port")
+	leaderLease := flag.Duration("leader-lease", 0, "leadership lease time (e.g. 60s). If > 0, leader will step down after this time.")
 	flag.Parse()
 
 	if err := privacy.Init(); err != nil {
@@ -217,6 +218,44 @@ func main() {
 			}
 		}
 	}()
+
+	if *leaderLease > 0 && *orderingMode == "raft" {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			var leaderStartTime time.Time
+			wasLeader := false
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					rl, ok := orderedLog.(*sequencing.RaftOrderedLog)
+					if !ok {
+						continue
+					}
+
+					isLeader := rl.IsLeader()
+					if isLeader && !wasLeader {
+						// Newly elected leader
+						leaderStartTime = time.Now()
+						fmt.Printf("Node %s elected leader! Lease expires in %s\n", *raftNodeID, leaderLease.String())
+					}
+
+					if isLeader && time.Since(leaderStartTime) > *leaderLease {
+						fmt.Printf("Node %s lease expired, relinquishing leadership...\n", *raftNodeID)
+						_ = rl.StepDown()
+						wasLeader = false // Reset
+						continue
+					}
+
+					wasLeader = isLeader
+				}
+			}
+		}()
+	}
 
 	grpcServer := grpc.NewServer()
 	rpcServer := rpc.NewServer(orderedLog)
