@@ -75,6 +75,30 @@ func (s *Server) Close() {
 }
 
 func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitAck, error) {
+	// If this is a Raft log, check for leadership.
+	if rl, ok := s.log.(*sequencing.RaftOrderedLog); ok {
+		if !rl.IsLeader() {
+			leaderRaftAddr := rl.LeaderAddress()
+			if leaderRaftAddr == "" {
+				return nil, fmt.Errorf("no leader available in cluster")
+			}
+
+			// Derive leader gRPC address from Raft address (e.g., 172.31.40.29:7000 -> 172.31.40.29:12345)
+			host, _, _ := net.SplitHostPort(string(leaderRaftAddr))
+			leaderGRPCAddr := net.JoinHostPort(host, "12345")
+
+			// Proxy the request to the leader
+			conn, err := grpc.Dial(leaderGRPCAddr, grpc.WithInsecure())
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to leader for proxying: %w", err)
+			}
+			defer conn.Close()
+
+			leaderClient := pb.NewRPCServiceClient(conn)
+			return leaderClient.SubmitTx(ctx, req)
+		}
+	}
+
 	tx, err := s.log.SubmitWithReceipt(ctx, req.Ciphertext)
 	if err != nil {
 		return &pb.SubmitAck{Accepted: false}, fmt.Errorf("failed to submit transaction: %w", err)

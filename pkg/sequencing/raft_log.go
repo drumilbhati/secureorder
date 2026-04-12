@@ -208,6 +208,11 @@ func (r *RaftOrderedLog) IsLeader() bool {
 	return r.raft.State() == raft.Leader
 }
 
+func (r *RaftOrderedLog) LeaderAddress() string {
+	_, id := r.raft.LeaderWithID()
+	return string(id)
+}
+
 func (r *RaftOrderedLog) StepDown() error {
 	if !r.IsLeader() {
 		return nil
