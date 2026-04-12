@@ -84,13 +84,20 @@ func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.Submi
 			}
 
 			// Derive leader gRPC address from Raft address (e.g., 172.31.40.29:7000 -> 172.31.40.29:12345)
-			host, _, _ := net.SplitHostPort(string(leaderRaftAddr))
+			host, _, err := net.SplitHostPort(string(leaderRaftAddr))
+			if err != nil {
+				// Fallback if the address doesn't contain a port
+				host = leaderRaftAddr
+			}
 			leaderGRPCAddr := net.JoinHostPort(host, "12345")
 
-			// Proxy the request to the leader
-			conn, err := grpc.Dial(leaderGRPCAddr, grpc.WithInsecure())
+			// Proxy the request to the leader with a connection timeout
+			dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer dialCancel()
+
+			conn, err := grpc.DialContext(dialCtx, leaderGRPCAddr, grpc.WithInsecure(), grpc.WithBlock())
 			if err != nil {
-				return nil, fmt.Errorf("failed to connect to leader for proxying: %w", err)
+				return nil, fmt.Errorf("failed to connect to leader %s for proxying: %w", leaderGRPCAddr, err)
 			}
 			defer conn.Close()
 

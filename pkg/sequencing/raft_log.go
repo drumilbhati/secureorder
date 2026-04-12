@@ -209,8 +209,8 @@ func (r *RaftOrderedLog) IsLeader() bool {
 }
 
 func (r *RaftOrderedLog) LeaderAddress() string {
-	_, id := r.raft.LeaderWithID()
-	return string(id)
+	addr, _ := r.raft.LeaderWithID()
+	return string(addr)
 }
 
 func (r *RaftOrderedLog) StepDown() error {
