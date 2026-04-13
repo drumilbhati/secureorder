@@ -12,6 +12,7 @@ Secure-Order is a high-performance, modular sequencing layer designed to elimina
 
 ## 🏗️ Architecture
 
+### System Overview
 ```mermaid
 graph TD
     Client[Clients/Bots] -->|1. Encrypted Tx| Sequencer[Sequencer Cluster - Raft]
@@ -22,6 +23,213 @@ graph TD
     Sequencer -->|6. Publish Commitment| EVM[Ethereum/OrderVerifier]
 ```
 
+### Transaction Flow Pipeline
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Sequencer as Sequencer<br/>Node
+    participant RaftLog as Raft<br/>Log
+    participant Mempool as Encrypted<br/>Mempool
+    participant Privacy as C++ Privacy<br/>Layer
+    participant SmartContract as OrderVerifier<br/>Contract
+
+    Client->>Sequencer: Submit encrypted transaction
+    Sequencer->>RaftLog: Replicate & assign SeqID
+    RaftLog-->>Sequencer: Ack replication
+    Sequencer->>Mempool: Queue in FIFO order
+    Note over Sequencer,Mempool: Immutable ordering guaranteed
+    Mempool->>Privacy: Batch reveal request
+    Privacy->>Privacy: Decrypt transactions
+    Privacy-->>Mempool: Plaintext batch
+    Mempool->>SmartContract: Publish cryptographic proof
+    SmartContract-->>Mempool: Commitment recorded on-chain
+```
+
+### MEV Protection Mechanism
+```mermaid
+graph LR
+    subgraph Traditional["⚠️ Traditional MEV Risk"]
+        A["TX in Mempool"] -->|Visible| B["Front-runner observes"]
+        B -->|Places order| C["Sandwich Attack"]
+        C -->|Extracts Value| D["MEV Lost"]
+    end
+
+    subgraph SecureOrder["✅ Secure-Order Protection"]
+        E["TX Encrypted"] -->|Hidden| F["Sequencer receives"]
+        F -->|FIFO assigned| G["Immutable Order"]
+        G -->|Decrypted batch| H["Execution"]
+        H -->|No advantage| I["MEV Eliminated"]
+    end
+    
+    style Traditional fill:#ff6b6b
+    style SecureOrder fill:#51cf66
+```
+
+### Raft Consensus for Ordering
+```mermaid
+graph TB
+    Client[Client] -->|Encrypted TX| Leader["Leader<br/>(Primary Sequencer)"]
+    Leader -->|Replicate| Follower1["Follower 1"]
+    Leader -->|Replicate| Follower2["Follower 2"]
+    Follower1 -->|ACK| Leader
+    Follower2 -->|ACK| Leader
+    Leader -->|Assign SeqID| Log["Immutable<br/>Commit Log"]
+    Log -->|Consensus| State["Shared State<br/>Across Cluster"]
+    
+    style Leader fill:#4dabf7
+    style Follower1 fill:#a8e6cf
+    style Follower2 fill:#a8e6cf
+    style State fill:#ffd93d
+```
+
+### Privacy Layer: Commit-Reveal Scheme
+```mermaid
+graph LR
+    subgraph Commit["Phase 1: Commit"]
+        TX["Plaintext TX"] -->|Encrypt with<br/>curve25519-xsalsa20-poly1305| Encrypted["Encrypted TX"]
+        Encrypted -->|Sequencer assigns<br/>immutable SeqID| Committed["(SeqID, Ciphertext)"]
+    end
+    
+    subgraph Reveal["Phase 2: Reveal"]
+        Committed -->|Batch window<br/>closes| Batch["Batch ready"]
+        Batch -->|Decrypt all| Decrypted["Plaintext Batch"]
+        Decrypted -->|Execute in<br/>SeqID order| Result["Ordered Execution"]
+    end
+    
+    Commit --> Reveal
+    style Commit fill:#e3f2fd
+    style Reveal fill:#f3e5f5
+```
+
+### Component Architecture
+```mermaid
+graph TB
+    subgraph Client["Client Layer"]
+        CLI["CLI Client"]
+        Bot["Trading Bots"]
+    end
+    
+    subgraph Sequencer["Sequencer Cluster"]
+        RPC["gRPC Server"]
+        Consensus["Raft<br/>Consensus"]
+        Queue["Encrypted<br/>Mempool"]
+        Coordinator["Coordinator"]
+    end
+    
+    subgraph Privacy["Privacy Engine"]
+        CppImpl["C++ Implementation"]
+        Libsodium["libsodium<br/>Crypto"]
+    end
+    
+    subgraph Execution["Execution Layer"]
+        DEX["Mock DEX<br/>Engine"]
+        SmartContract["OrderVerifier<br/>Contract"]
+    end
+    
+    CLI -->|gRPC| RPC
+    Bot -->|gRPC| RPC
+    RPC --> Consensus
+    Consensus --> Queue
+    Queue --> Coordinator
+    Coordinator --> CppImpl
+    CppImpl --> Libsodium
+    Coordinator --> DEX
+    Coordinator --> SmartContract
+    
+    style Client fill:#e8f5e9
+    style Sequencer fill:#e3f2fd
+    style Privacy fill:#f3e5f5
+    style Execution fill:#fff3e0
+```
+
+### Technology Stack
+```mermaid
+graph TB
+    subgraph Crypto["🔐 Cryptography"]
+        Sodium["libsodium"]
+        Curve25519["curve25519<br/>Encryption"]
+        XSalsa20["XSalsa20<br/>Stream Cipher"]
+        Poly1305["Poly1305<br/>Auth Tag"]
+    end
+    
+    subgraph Consensus["⏱️ Consensus"]
+        Raft["Hashicorp<br/>Raft"]
+        Log["Replicated<br/>Log"]
+    end
+    
+    subgraph Sequencing["🚀 Sequencing"]
+        Go["Go 1.21+"]
+        gRPC["gRPC<br/>Communication"]
+    end
+    
+    subgraph SmartContracts["🔗 Smart Contracts"]
+        Solidity["Solidity"]
+        Hardhat["Hardhat<br/>Framework"]
+        Ethers["Ethers.js"]
+    end
+    
+    Sodium --> Curve25519
+    Curve25519 --> XSalsa20
+    XSalsa20 --> Poly1305
+    
+    style Crypto fill:#ffe0b2
+    style Consensus fill:#c8e6c9
+    style Sequencing fill:#b3e5fc
+    style SmartContracts fill:#f8bbd0
+```
+
+## 📊 How It Works: Step-by-Step
+
+### The Problem We Solve
+```
+Traditional DEX:
+User TX in Mempool → Attacker sees TX → Front-runs it → User pays premium
+                                           MEV extracted = User's loss
+```
+
+```
+Secure-Order:
+User TX encrypted → Sequencer assigns order → TX revealed → Executed in order
+                       No one sees contents → No front-running possible
+```
+
+### Execution Flow Diagram
+```mermaid
+graph LR
+    Step1["1️⃣ Client encrypts<br/>transaction"] -->
+    Step2["2️⃣ Sends to<br/>sequencer"] -->
+    Step3["3️⃣ Raft consensus<br/>assigns SeqID"] -->
+    Step4["4️⃣ Stored in<br/>encrypted mempool"] -->
+    Step5["5️⃣ Batch revealed<br/>& decrypted"] -->
+    Step6["6️⃣ Execute in<br/>FIFO order"] -->
+    Step7["7️⃣ Proof published<br/>on-chain"]
+    
+    style Step1 fill:#e0e7ff
+    style Step2 fill:#e0e7ff
+    style Step3 fill:#ddd6fe
+    style Step4 fill:#dbeafe
+    style Step5 fill:#fbcfe8
+    style Step6 fill:#fecbcb
+    style Step7 fill:#fef08a
+```
+
+### Key Guarantees
+```mermaid
+graph TB
+    subgraph Guarantees["🛡️ Secure-Order Guarantees"]
+        G1["✓ Verifiable Order<br/>via Raft Consensus"]
+        G2["✓ Private Sequencing<br/>via Encryption"]
+        G3["✓ FIFO Execution<br/>No Fairness Issues"]
+        G4["✓ On-Chain Proof<br/>Smart Contract"]
+        G5["✓ MEV Prevention<br/>No Front-Running"]
+        G6["✓ Scalable Cluster<br/>Multi-Node"]
+    end
+    
+    style Guarantees fill:#f0fdf4
+```
+
+---
+
 ## 🛠️ Technology Stack
 
 - **Privacy Layer**: C++17, libsodium
@@ -30,7 +238,22 @@ graph TD
 - **Smart Contracts**: Solidity, Hardhat, Ethers.js
 - **Communication**: gRPC (Protobuf)
 
+### Security Properties
+```mermaid
+graph LR
+    A["Confidentiality<br/>Transactions Hidden<br/>Until Reveal"] --> B["Integrity<br/>Raft-Backed<br/>Order Guarantee"]
+    B --> C["Availability<br/>Distributed<br/>Sequencers"]
+    C --> D["Fairness<br/>FIFO Ordering<br/>No Prioritization"]
+    
+    style A fill:#ffcccc
+    style B fill:#ccffcc
+    style C fill:#ccccff
+    style D fill:#ffffcc
+```
+
 ---
+
+
 
 ## 🚀 Quick Start
 
