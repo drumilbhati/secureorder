@@ -48,13 +48,13 @@ sequenceDiagram
 ### MEV Protection Mechanism
 ```mermaid
 graph LR
-    subgraph Traditional["⚠️ Traditional MEV Risk"]
+    subgraph Traditional["Traditional MEV Risk"]
         A["TX in Mempool"] -->|Visible| B["Front-runner observes"]
         B -->|Places order| C["Sandwich Attack"]
         C -->|Extracts Value| D["MEV Lost"]
     end
 
-    subgraph SecureOrder["✅ Secure-Order Protection"]
+    subgraph SecureOrder["Secure-Order Protection"]
         E["TX Encrypted"] -->|Hidden| F["Sequencer receives"]
         F -->|FIFO assigned| G["Immutable Order"]
         G -->|Decrypted batch| H["Execution"]
@@ -145,24 +145,24 @@ graph TB
 ### Technology Stack
 ```mermaid
 graph TB
-    subgraph Crypto["🔐 Cryptography"]
+    subgraph Crypto["Cryptography"]
         Sodium["libsodium"]
         Curve25519["curve25519<br/>Encryption"]
         XSalsa20["XSalsa20<br/>Stream Cipher"]
         Poly1305["Poly1305<br/>Auth Tag"]
     end
     
-    subgraph Consensus["⏱️ Consensus"]
+    subgraph Consensus["Consensus"]
         Raft["Hashicorp<br/>Raft"]
         Log["Replicated<br/>Log"]
     end
     
-    subgraph Sequencing["🚀 Sequencing"]
+    subgraph Sequencing["Sequencing"]
         Go["Go 1.21+"]
         gRPC["gRPC<br/>Communication"]
     end
     
-    subgraph SmartContracts["🔗 Smart Contracts"]
+    subgraph SmartContracts["Smart Contracts"]
         Solidity["Solidity"]
         Hardhat["Hardhat<br/>Framework"]
         Ethers["Ethers.js"]
@@ -196,13 +196,13 @@ User TX encrypted → Sequencer assigns order → TX revealed → Executed in or
 ### Execution Flow Diagram
 ```mermaid
 graph LR
-    Step1["1️⃣ Client encrypts<br/>transaction"] -->
-    Step2["2️⃣ Sends to<br/>sequencer"] -->
-    Step3["3️⃣ Raft consensus<br/>assigns SeqID"] -->
-    Step4["4️⃣ Stored in<br/>encrypted mempool"] -->
-    Step5["5️⃣ Batch revealed<br/>& decrypted"] -->
-    Step6["6️⃣ Execute in<br/>FIFO order"] -->
-    Step7["7️⃣ Proof published<br/>on-chain"]
+    Step1["Step 1: Client encrypts<br/>transaction"] -->
+    Step2["Step 2: Sends to<br/>sequencer"] -->
+    Step3["Step 3: Raft consensus<br/>assigns SeqID"] -->
+    Step4["Step 4: Stored in<br/>encrypted mempool"] -->
+    Step5["Step 5: Batch revealed<br/>& decrypted"] -->
+    Step6["Step 6: Execute in<br/>FIFO order"] -->
+    Step7["Step 7: Proof published<br/>on-chain"]
     
     style Step1 fill:#e0e7ff
     style Step2 fill:#e0e7ff
@@ -216,13 +216,13 @@ graph LR
 ### Key Guarantees
 ```mermaid
 graph TB
-    subgraph Guarantees["🛡️ Secure-Order Guarantees"]
-        G1["✓ Verifiable Order<br/>via Raft Consensus"]
-        G2["✓ Private Sequencing<br/>via Encryption"]
-        G3["✓ FIFO Execution<br/>No Fairness Issues"]
-        G4["✓ On-Chain Proof<br/>Smart Contract"]
-        G5["✓ MEV Prevention<br/>No Front-Running"]
-        G6["✓ Scalable Cluster<br/>Multi-Node"]
+    subgraph Guarantees["Secure-Order Guarantees"]
+        G1["CHECK Verifiable Order<br/>via Raft Consensus"]
+        G2["CHECK Private Sequencing<br/>via Encryption"]
+        G3["CHECK FIFO Execution<br/>No Fairness Issues"]
+        G4["CHECK On-Chain Proof<br/>Smart Contract"]
+        G5["CHECK MEV Prevention<br/>No Front-Running"]
+        G6["CHECK Scalable Cluster<br/>Multi-Node"]
     end
     
     style Guarantees fill:#f0fdf4
