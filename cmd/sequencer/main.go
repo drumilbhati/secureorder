@@ -134,6 +134,7 @@ func main() {
 	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap a new Raft cluster on this node")
 	raftPeers := flag.String("raft-peers", "", "comma-separated raft peers as nodeID=host:port")
 	leaderLease := flag.Duration("leader-lease", 0, "leadership lease time (e.g. 60s). If > 0, leader will step down after this time.")
+	publisherType := flag.String("publisher-type", "local", "settlement publisher type: local or evm")
 	flag.Parse()
 
 	if err := privacy.Init(); err != nil {
@@ -155,6 +156,7 @@ func main() {
 	}
 
 	fmt.Println("Sequencer keys ready in keys/")
+	fmt.Printf("Publisher type: %s\n", *publisherType)
 	logStartupConfiguration(*orderingMode, *grpcAddr, *raftNodeID, *raftBind, *raftDataDir, *raftBootstrap, peers)
 
 	orderedLog, err := newOrderedLog(*orderingMode, *raftNodeID, *raftBind, *raftPeers, *raftDataDir, *raftBootstrap)
