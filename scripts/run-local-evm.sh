@@ -28,7 +28,7 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
-nohup npx hardhat node >"$LOG_FILE" 2>&1 &
+nohup npx hardhat node --hostname 0.0.0.0 >"$LOG_FILE" 2>&1 &
 pid=$!
 echo "$pid" >"$PID_FILE"
 
