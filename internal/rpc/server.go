@@ -33,45 +33,15 @@ func NewServer(log sequencing.OrderedLog) *Server {
 		done:      make(chan struct{}),
 	}
 
-	go s.runSettlementLoop()
-
 	return s
-}
-
-func (s *Server) runSettlementLoop() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	var lastPublishedCommitment string
-
-	for {
-		select {
-		case <-s.done:
-			return
-		case <-ticker.C:
-			last, ok := s.proofs.Last()
-			if !ok {
-				continue
-			}
-
-			if last.Commitment == lastPublishedCommitment {
-				continue
-			}
-
-			// Perform asynchronous settlement of the latest batch commitment
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			if err := s.publisher.PublishCommitment(ctx, last.Commitment); err != nil {
-				fmt.Printf("failed to publish background commitment: %v\n", err)
-			} else {
-				lastPublishedCommitment = last.Commitment
-			}
-			cancel()
-		}
-	}
 }
 
 func (s *Server) Close() {
 	close(s.done)
+}
+
+func (s *Server) PublishCommitment(ctx context.Context, commitment string) error {
+	return s.publisher.PublishCommitment(ctx, commitment)
 }
 
 func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitAck, error) {

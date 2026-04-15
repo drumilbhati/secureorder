@@ -181,42 +181,55 @@ func main() {
 	}()
 
 	go func() {
-		revealTicker := time.NewTicker(300 * time.Millisecond)
-		defer revealTicker.Stop()
-
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-revealTicker.C:
+			default:
 			}
 
-			batch := mempool.DrainUpTo(10)
+			batchSize := 1000
+			batch := mempool.DrainWait(ctx, batchSize)
 			if len(batch) == 0 {
 				continue
 			}
+
+			fmt.Printf("Processing batch of %d transactions...\n", len(batch))
 
 			ciphertexts := make([][]byte, len(batch))
 			for i := range batch {
 				ciphertexts[i] = batch[i].Ciphertext
 			}
 
+			// 1. Generate Batch Commitment for Settlement
+			batchCommitment := sequencing.GenerateBatchCommitment(batch)
+			fmt.Printf("Batch commitment: %s\n", batchCommitment)
+
+			// 2. Publish to EVM (if leader and publisher is configured)
+			if rl, ok := orderedLog.(*sequencing.RaftOrderedLog); !ok || rl.IsLeader() {
+				settleCtx, settleCancel := context.WithTimeout(context.Background(), 15*time.Second)
+				if err := rpcServer.PublishCommitment(settleCtx, batchCommitment); err != nil {
+					fmt.Printf("failed to publish batch commitment: %v\n", err)
+				} else {
+					fmt.Printf("Successfully published batch commitment to EVM\n")
+				}
+				settleCancel()
+			}
+
+			// 3. Decrypt and Process
 			plaintexts, batchErr := privacy.DecryptBatch(ciphertexts, pubKey, secKey)
 			if batchErr == nil {
-				for i, tx := range batch {
-					fmt.Printf("Processed tx ID=%d, plaintext=%s\n", tx.ID, string(plaintexts[i]))
-				}
+				fmt.Printf("Successfully decrypted batch of %d\n", len(batch))
 				continue
 			}
 
 			log.Printf("batch decrypt failed, falling back to per-item decrypt: %v", batchErr)
 			for _, tx := range batch {
-				plaintext, decErr := privacy.DecryptSingle(tx.Ciphertext, pubKey, secKey)
+				_, decErr := privacy.DecryptSingle(tx.Ciphertext, pubKey, secKey)
 				if decErr != nil {
 					log.Printf("failed to decrypt tx ID=%d: %v", tx.ID, decErr)
 					continue
 				}
-				fmt.Printf("Processed tx ID=%d, plaintext=%s\n", tx.ID, string(plaintext))
 			}
 		}
 	}()

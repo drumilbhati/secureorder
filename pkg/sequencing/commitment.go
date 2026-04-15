@@ -56,3 +56,20 @@ func GenerateReceptionCommitment(tx EncryptedTransaction) string {
 
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// GenerateBatchCommitment creates a single root hash for a batch of transactions.
+func GenerateBatchCommitment(batch []EncryptedTransaction) string {
+	h := sha256.New()
+	for _, tx := range batch {
+		var id [8]byte
+		binary.LittleEndian.PutUint64(id[:], tx.ID)
+		_, _ = h.Write(id[:])
+
+		var ts [8]byte
+		binary.LittleEndian.PutUint64(ts[:], uint64(tx.ArrivedAt.UnixNano()))
+		_, _ = h.Write(ts[:])
+
+		_, _ = h.Write(tx.Ciphertext)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
