@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/drumilbhati/secureorder/internal/settlement"
@@ -18,6 +19,10 @@ type Server struct {
 	proofs    *sequencing.ReceptionStore
 	publisher settlement.CommitmentPublisher
 	done      chan struct{}
+
+	mu         sync.RWMutex
+	proxyCache map[string]pb.RPCServiceClient
+	conns      map[string]*grpc.ClientConn
 }
 
 func NewServer(log sequencing.OrderedLog) *Server {
@@ -27,17 +32,55 @@ func NewServer(log sequencing.OrderedLog) *Server {
 	}
 
 	s := &Server{
-		log:       log,
-		proofs:    sequencing.NewReceptionStore(),
-		publisher: publisher,
-		done:      make(chan struct{}),
+		log:        log,
+		proofs:     sequencing.NewReceptionStore(),
+		publisher:  publisher,
+		done:       make(chan struct{}),
+		proxyCache: make(map[string]pb.RPCServiceClient),
+		conns:      make(map[string]*grpc.ClientConn),
 	}
 
 	return s
 }
 
+func (s *Server) getProxyClient(addr string) (pb.RPCServiceClient, error) {
+	s.mu.RLock()
+	client, ok := s.proxyCache[addr]
+	s.mu.RUnlock()
+	if ok {
+		return client, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double check
+	if client, ok := s.proxyCache[addr]; ok {
+		return client, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		return nil, err
+	}
+
+	client = pb.NewRPCServiceClient(conn)
+	s.proxyCache[addr] = client
+	s.conns[addr] = conn
+
+	return client, nil
+}
+
 func (s *Server) Close() {
 	close(s.done)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, conn := range s.conns {
+		_ = conn.Close()
+	}
 }
 
 func (s *Server) PublishCommitment(ctx context.Context, commitment string) error {
@@ -61,17 +104,10 @@ func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.Submi
 			}
 			leaderGRPCAddr := net.JoinHostPort(host, "12345")
 
-			// Proxy the request to the leader with a connection timeout
-			dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer dialCancel()
-
-			conn, err := grpc.DialContext(dialCtx, leaderGRPCAddr, grpc.WithInsecure(), grpc.WithBlock())
+			leaderClient, err := s.getProxyClient(leaderGRPCAddr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to connect to leader %s for proxying: %w", leaderGRPCAddr, err)
 			}
-			defer conn.Close()
-
-			leaderClient := pb.NewRPCServiceClient(conn)
 			return leaderClient.SubmitTx(ctx, req)
 		}
 	}
