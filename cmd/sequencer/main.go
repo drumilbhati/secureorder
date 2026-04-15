@@ -210,13 +210,17 @@ func main() {
 
 			// 2. Publish to EVM (if leader and publisher is configured)
 			if rl, ok := orderedLog.(*sequencing.RaftOrderedLog); !ok || rl.IsLeader() {
-				settleCtx, settleCancel := context.WithTimeout(context.Background(), 15*time.Second)
-				if err := rpcServer.PublishCommitment(settleCtx, batchCommitment); err != nil {
-					fmt.Printf("failed to publish batch commitment: %v\n", err)
-				} else {
-					fmt.Printf("Successfully published batch commitment to EVM\n")
-				}
-				settleCancel()
+				// Run settlement asynchronously so it doesn't block the next batch
+				go func(commitment string) {
+					settleCtx, settleCancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer settleCancel()
+
+					if err := rpcServer.PublishCommitment(settleCtx, commitment); err != nil {
+						fmt.Printf("failed to publish batch commitment: %v\n", err)
+					} else {
+						fmt.Printf("Successfully published batch commitment to EVM: %s\n", commitment)
+					}
+				}(batchCommitment)
 			}
 
 			// 3. Decrypt and Process
