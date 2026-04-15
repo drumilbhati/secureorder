@@ -238,18 +238,31 @@ contract MockDEXEngine {
             // Share = min(amountA / reserveA, amountB / reserveB) * totalShares
             // This ensures existing LPs don't get diluted
 
-            uint256 shareFromA = (amountA * totalLiquidityShares) / reserveTokenA;
-            uint256 shareFromB = (amountB * totalLiquidityShares) / reserveTokenB;
+            uint256 amountAOptimal;
+            uint256 amountBOptimal;
 
-            // Use the minimum to maintain proportional balance
-            // (if one ratio is higher, we'd be adding too much of one token)
-            sharesToMint = shareFromA < shareFromB ? shareFromA : shareFromB;
+            uint256 amountBQuote = (amountA * reserveTokenB) / reserveTokenA;
+            if (amountBQuote <= amountB) {
+                amountAOptimal = amountA;
+                amountBOptimal = amountBQuote;
+            } else {
+                uint256 amountAQuote = (amountB * reserveTokenA) / reserveTokenB;
+                assert(amountAQuote <= amountA);
+                amountAOptimal = amountAQuote;
+                amountBOptimal = amountB;
+            }
+
+            sharesToMint = (amountAOptimal * totalLiquidityShares) / reserveTokenA;
 
             require(sharesToMint > 0, "Liquidity too small");
 
             // Update pool reserves
-            reserveTokenA += amountA;
-            reserveTokenB += amountB;
+            reserveTokenA += amountAOptimal;
+            reserveTokenB += amountBOptimal;
+            
+            // Re-assign amountA and amountB to actual consumed amounts for the balance deduction
+            amountA = amountAOptimal;
+            amountB = amountBOptimal;
 
             // Verify constant product formula still holds (k can only increase due to fees)
             uint256 newK = reserveTokenA * reserveTokenB;

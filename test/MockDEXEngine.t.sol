@@ -412,10 +412,11 @@ contract MockDEXEngineTest is Test {
      * - Verifies transaction reverts when user has insufficient tokens
      */
     function test_AddLiquidityInsufficientBalance() public {
-        vm.prank(CHARLIE);
-        dex.mintTestTokens(CHARLIE, 50e18, 50e18); // Low balance
+        address DAVE = address(0x4);
+        vm.prank(DAVE);
+        dex.mintTestTokens(DAVE, 50e18, 50e18); // Low balance
 
-        vm.prank(CHARLIE);
+        vm.prank(DAVE);
         vm.expectRevert("Insufficient TokenA balance");
         dex.addLiquidity(100e18, 100e18); // Try to add more than has
     }
@@ -429,12 +430,13 @@ contract MockDEXEngineTest is Test {
         vm.prank(ALICE);
         dex.addLiquidity(100e18, 100e18);
 
-        // Charlie has low balance
-        vm.prank(CHARLIE);
-        dex.mintTestTokens(CHARLIE, 50e18, 50e18);
+        address DAVE = address(0x4);
+        // DAVE has low balance
+        vm.prank(DAVE);
+        dex.mintTestTokens(DAVE, 50e18, 50e18);
 
-        // Charlie tries to swap more than they have
-        vm.prank(CHARLIE);
+        // DAVE tries to swap more than they have
+        vm.prank(DAVE);
         vm.expectRevert("Insufficient TokenA balance");
         dex.swapExactTokenAForTokenB(60e18, 1e18);
     }
@@ -535,7 +537,7 @@ contract MockDEXEngineTest is Test {
         // 3. Charlie swaps 100 TokenA for TokenB (10 times)
         for (uint256 i = 0; i < 10; i++) {
             vm.prank(CHARLIE);
-            dex.swapExactTokenAForTokenB(100e18, 50e18);
+            dex.swapExactTokenAForTokenB(100e18, 10e18);
         }
 
         // 4. Alice removes 50% of liquidity
