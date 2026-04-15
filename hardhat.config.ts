@@ -20,14 +20,8 @@ export default defineConfig({
 		},
 	},
 	networks: {
-		hardhat: {
-			mining: {
-				auto: true,
-				interval: 1000,
-			},
-		},
 		localhost: {
-			url: "http://0.0.0.0:8545",
+			url: "http://127.0.0.1:8545",
 		},
 		hardhatMainnet: {
 			type: "edr-simulated",
