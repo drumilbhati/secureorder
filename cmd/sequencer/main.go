@@ -165,6 +165,9 @@ func main() {
 	}
 	mempool := sequencing.NewEncryptedMempool(1024)
 
+	// Initialize rpcServer early so goroutines can use it
+	rpcServer := rpc.NewServer(orderedLog)
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
@@ -217,7 +220,7 @@ func main() {
 			}
 
 			// 3. Decrypt and Process
-			plaintexts, batchErr := privacy.DecryptBatch(ciphertexts, pubKey, secKey)
+			_, batchErr := privacy.DecryptBatch(ciphertexts, pubKey, secKey)
 			if batchErr == nil {
 				fmt.Printf("Successfully decrypted batch of %d\n", len(batch))
 				continue
@@ -273,7 +276,6 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	rpcServer := rpc.NewServer(orderedLog)
 	rpc.Register(grpcServer, rpcServer)
 
 	lis, err := net.Listen("tcp", *grpcAddr)
