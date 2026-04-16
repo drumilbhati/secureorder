@@ -271,17 +271,36 @@ sudo apt update && sudo apt install -y build-essential cmake libsodium-dev pkg-c
 
 ### 2. Build the System
 
+Build the native C++ library first, then build the Go binaries.
+
 ```bash
 # Build C++ Privacy Layer
-cd cpp && mkdir -p build && cd build
-cmake .. && make -j$(nproc)
+cd cpp
+mkdir -p build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=. ..
+make -j$(nproc)
+make install
 cd ../..
 
 # Install JS dependencies (for Smart Contracts)
 npm install
 
-# Build Go Binaries
+# Export linker/runtime environment
+export CXXFLAGS="-std=c++17"
+export LDFLAGS="-L./cpp/build/lib -lprivacy -lsodium -lstdc++"
+export LD_LIBRARY_PATH="$PWD/cpp/build/lib:$LD_LIBRARY_PATH"
+
+# Build Go binaries
 ./scripts/build-local.sh
+```
+
+If you want the sequencer to publish commitments to the EVM, build the sequencer with EVM support enabled:
+
+```bash
+CGO_ENABLED=1 go build -tags evm -o bin/sequencer ./cmd/sequencer
+CGO_ENABLED=1 go build -o bin/client ./cmd/client
+CGO_ENABLED=1 go build -o bin/rpc-loadtest ./cmd/rpc-loadtest
 ```
 
 ### 3. Run a 5-Node Raft Cluster (Demo)
@@ -303,19 +322,63 @@ ADDR=localhost:12345 ./scripts/load-local-raft.sh
 
 The sequencer generates a cryptographic commitment for every batch of transactions. This commitment is published to the `OrderVerifier` contract on-chain to provide a proof-of-sequencing.
 
-### Deploying the Contract
-```bash
-# Start a local EVM node
-./scripts/run-local-evm.sh
+### Important note
 
-# Deploy OrderVerifier
-./scripts/deploy-local-order-verifier.sh
+For the current dependency versions in this repository, the bundled local EVM helper scripts are outdated:
+
+- `./scripts/run-local-evm.sh` uses a Hardhat CLI flag that is not accepted by the installed Hardhat version
+- `./scripts/deploy-local-order-verifier.sh` deploys to a simulated network instead of the long-running localhost RPC node used by the sequencer
+
+Use the manual procedure below instead.
+
+### Start a local Hardhat EVM node
+```bash
+mkdir -p .local/evm/logs .local/evm/pids
+nohup npx hardhat node --hostname 0.0.0.0 > .local/evm/logs/hardhat-node.log 2>&1 < /dev/null &
+echo $! > .local/evm/pids/hardhat.pid
+
+# Verify the node is listening on 8545
+cat .local/evm/pids/hardhat.pid
+ss -ltnp | grep 8545
 ```
 
-### Running Sequencer with EVM
+### Deploy `OrderVerifier` to the running localhost node
 ```bash
-# This script automatically reads the deployed address and connects
-./scripts/run-local-raft-with-evm.sh --fresh
+deploy_output="$(npx hardhat run scripts/deploy-order-verifier.ts --network localhost)"
+echo "$deploy_output"
+
+address="$(echo "$deploy_output" | awk '/OrderVerifier deployed at:/ {print $4}')"
+test -n "$address"
+
+mkdir -p .local/evm
+printf '%s\n' "$address" > .local/evm/order_verifier.address
+cat .local/evm/order_verifier.address
+```
+
+### Environment required for EVM settlement
+```bash
+export ORDER_VERIFIER_CONTRACT="$(cat .local/evm/order_verifier.address)"
+export ORDER_VERIFIER_RPC_URL="http://127.0.0.1:8545"
+export ORDER_VERIFIER_CHAIN_ID="31337"
+export ORDER_VERIFIER_PRIVATE_KEY="ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+export LD_LIBRARY_PATH="$PWD/cpp/build/lib:$LD_LIBRARY_PATH"
+```
+
+### Running the sequencer with EVM settlement
+Build the EVM-enabled sequencer first:
+
+```bash
+CGO_ENABLED=1 go build -tags evm -o bin/sequencer ./cmd/sequencer
+```
+
+Then start your sequencer or Raft nodes with the environment above already exported.
+Only the current Raft leader will publish `commitOrder` transactions.
+
+### Verifying on-chain settlement
+Watch the local Hardhat log for `OrderVerifier#commitOrder` calls:
+
+```bash
+tail -f .local/evm/logs/hardhat-node.log
 ```
 
 ---
