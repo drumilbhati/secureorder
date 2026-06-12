@@ -578,20 +578,57 @@ Because follower proxying is implemented, clients may also be able to submit thr
 
 ---
 
-## ✅ Operational Checklist
+## ☸️ Phase 7: Kubernetes Deployment and Autoscaling
 
-For a successful EVM-enabled AWS deployment, all of the following should be true:
+Secure-Order supports native Kubernetes deployment using a `StatefulSet`. This provides stable network identities (`sequencer-0`, `sequencer-1`, etc.) and persistent storage for the Raft log.
 
-- `cpp/build/lib/libprivacy.a` exists on each node
-- `bin/sequencer` was built with `-tags evm`
-- all nodes share the same `keys/` directory
-- Node 1 is running Hardhat on `0.0.0.0:8545`
-- contract was deployed using `--network localhost`
-- all nodes use the same fresh `ORDER_VERIFIER_CONTRACT`
-- all nodes use the real Hardhat funded private key
-- Node 1 is bootstrapped only for a truly fresh cluster
-- all restarts of an existing cluster omit bootstrap
-- leader log shows successful EVM commitment publishing
-- Hardhat log shows `commitOrder` transactions reaching `OrderVerifier`
+### 1. Dynamic Raft Membership
+The sequencer implements a `JoinCluster` gRPC endpoint. When the Kubernetes `HorizontalPodAutoscaler` (HPA) spins up a new pod (e.g., `sequencer-3`), the pod:
+- Detects it has no local Raft state.
+- Contacts `sequencer-0` (the bootstrap seed) via gRPC.
+- Requests to join the cluster.
+- The leader formally adds the new pod to the Raft consensus group.
+
+### 2. Containerization
+Build the multi-stage Docker image which includes the C++ privacy layer and the Go sequencing engine:
+
+```bash
+docker build -t secureorder/sequencer:latest .
+```
+
+### 3. Deploying to Kubernetes
+Apply the provided manifests in the `k8s/` directory:
+
+```bash
+# Headless service for stable DNS
+kubectl apply -f k8s/service.yaml
+
+# StatefulSet for managed pods and persistence
+kubectl apply -f k8s/statefulset.yaml
+
+# HPA for load-based scaling
+kubectl apply -f k8s/hpa.yaml
+```
+
+### 4. Verifying Autoscaling
+To test the autoscaling behavior:
+
+1. **Monitor the HPA**:
+   ```bash
+   kubectl get hpa sequencer-hpa -w
+   ```
+
+2. **Generate Load**:
+   Use the `rpc-loadtest` tool to increase CPU utilization:
+   ```bash
+   kubectl port-forward svc/sequencer 12345:12345
+   ./bin/rpc-loadtest -addr localhost:12345 -concurrency 50 -duration 5m
+   ```
+
+3. **Observe Scale-Out**:
+   Kubernetes will detect the load and increase the replica count. Check the logs of the newly created pods to see them joining the cluster:
+   ```bash
+   kubectl logs sequencer-3 | grep "Successfully joined cluster"
+   ```
 
 ---
