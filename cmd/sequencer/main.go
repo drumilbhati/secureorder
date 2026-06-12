@@ -16,6 +16,7 @@ import (
 	"github.com/drumilbhati/secureorder/internal/rpc"
 	"github.com/drumilbhati/secureorder/pkg/privacy"
 	"github.com/drumilbhati/secureorder/pkg/sequencing"
+	pb "github.com/drumilbhati/secureorder/proto"
 	"google.golang.org/grpc"
 )
 
@@ -96,6 +97,38 @@ func logStartupConfiguration(orderingMode, grpcAddr, raftNodeID, raftBind, raftD
 	}
 }
 
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
+func attemptJoin(joinAddr, nodeID, raftAddr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, joinAddr, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		return fmt.Errorf("dial join address: %w", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewRPCServiceClient(conn)
+	resp, err := client.JoinCluster(ctx, &pb.JoinRequest{
+		NodeId:      nodeID,
+		RaftAddress: raftAddr,
+	})
+	if err != nil {
+		return fmt.Errorf("join cluster rpc: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("join cluster failed: %s", resp.ErrorMessage)
+	}
+
+	fmt.Println("Successfully joined cluster")
+	return nil
+}
+
 func loadOrCreateSequencerKeys() ([]byte, []byte, error) {
 	if err := os.MkdirAll("keys", 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create key directory: %w", err)
@@ -133,6 +166,7 @@ func main() {
 	raftDataDir := flag.String("raft-data-dir", "", "Raft data directory for persistent state")
 	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap a new Raft cluster on this node")
 	raftPeers := flag.String("raft-peers", "", "comma-separated raft peers as nodeID=host:port")
+	raftJoinAddr := flag.String("raft-join-addr", "", "existing cluster gRPC address to join")
 	leaderLease := flag.Duration("leader-lease", 0, "leadership lease time (e.g. 60s). If > 0, leader will step down after this time.")
 	publisherType := flag.String("publisher-type", "local", "settlement publisher type: local or evm")
 	flag.Parse()
@@ -153,6 +187,18 @@ func main() {
 
 	if *raftDataDir == "" {
 		*raftDataDir = defaultRaftDataDir(*raftNodeID)
+	}
+
+	if *orderingMode == "raft" && !*raftBootstrap && *raftJoinAddr != "" {
+		// Only attempt join if we don't have local Raft state already
+		if !pathExists(filepath.Join(*raftDataDir, "raft-log.bolt")) {
+			fmt.Printf("Fresh node detected. Attempting to join cluster via %s...\n", *raftJoinAddr)
+			if err := attemptJoin(*raftJoinAddr, *raftNodeID, *raftBind); err != nil {
+				log.Fatalf("failed to join cluster: %v", err)
+			}
+		} else {
+			fmt.Println("Local Raft state found, skipping dynamic join.")
+		}
 	}
 
 	fmt.Println("Sequencer keys ready in keys/")

@@ -213,6 +213,11 @@ func (r *RaftOrderedLog) LeaderAddress() string {
 	return string(addr)
 }
 
+func (r *RaftOrderedLog) AddVoter(id, address string) error {
+	future := r.raft.AddVoter(raft.ServerID(id), raft.ServerAddress(address), 0, 0)
+	return future.Error()
+}
+
 func (r *RaftOrderedLog) StepDown() error {
 	if !r.IsLeader() {
 		return nil

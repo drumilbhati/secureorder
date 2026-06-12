@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RPCService_SubmitTx_FullMethodName = "/rpc_service.RPCService/SubmitTx"
+	RPCService_SubmitTx_FullMethodName    = "/rpc_service.RPCService/SubmitTx"
+	RPCService_JoinCluster_FullMethodName = "/rpc_service.RPCService/JoinCluster"
 )
 
 // RPCServiceClient is the client API for RPCService service.
@@ -28,6 +29,8 @@ const (
 type RPCServiceClient interface {
 	// SubmitTx receives the raw sealed-box ciphertext from client
 	SubmitTx(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitAck, error)
+	// JoinCluster allows a new node to request to join an existing Raft cluster
+	JoinCluster(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
 }
 
 type rPCServiceClient struct {
@@ -48,12 +51,24 @@ func (c *rPCServiceClient) SubmitTx(ctx context.Context, in *SubmitRequest, opts
 	return out, nil
 }
 
+func (c *rPCServiceClient) JoinCluster(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JoinResponse)
+	err := c.cc.Invoke(ctx, RPCService_JoinCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RPCServiceServer is the server API for RPCService service.
 // All implementations must embed UnimplementedRPCServiceServer
 // for forward compatibility.
 type RPCServiceServer interface {
 	// SubmitTx receives the raw sealed-box ciphertext from client
 	SubmitTx(context.Context, *SubmitRequest) (*SubmitAck, error)
+	// JoinCluster allows a new node to request to join an existing Raft cluster
+	JoinCluster(context.Context, *JoinRequest) (*JoinResponse, error)
 	mustEmbedUnimplementedRPCServiceServer()
 }
 
@@ -66,6 +81,9 @@ type UnimplementedRPCServiceServer struct{}
 
 func (UnimplementedRPCServiceServer) SubmitTx(context.Context, *SubmitRequest) (*SubmitAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitTx not implemented")
+}
+func (UnimplementedRPCServiceServer) JoinCluster(context.Context, *JoinRequest) (*JoinResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method JoinCluster not implemented")
 }
 func (UnimplementedRPCServiceServer) mustEmbedUnimplementedRPCServiceServer() {}
 func (UnimplementedRPCServiceServer) testEmbeddedByValue()                    {}
@@ -106,6 +124,24 @@ func _RPCService_SubmitTx_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RPCService_JoinCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RPCServiceServer).JoinCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RPCService_JoinCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RPCServiceServer).JoinCluster(ctx, req.(*JoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RPCService_ServiceDesc is the grpc.ServiceDesc for RPCService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -116,6 +152,10 @@ var RPCService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitTx",
 			Handler:    _RPCService_SubmitTx_Handler,
+		},
+		{
+			MethodName: "JoinCluster",
+			Handler:    _RPCService_JoinCluster_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

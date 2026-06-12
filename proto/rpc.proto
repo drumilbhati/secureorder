@@ -7,6 +7,9 @@ option go_package = "./proto";
 service RPCService {
   // SubmitTx receives the raw sealed-box ciphertext from client
   rpc SubmitTx(SubmitRequest) returns (SubmitAck) {}
+
+  // JoinCluster allows a new node to request to join an existing Raft cluster
+  rpc JoinCluster(JoinRequest) returns (JoinResponse) {}
 }
 
 message SubmitRequest {
@@ -15,4 +18,14 @@ message SubmitRequest {
 
 message SubmitAck {
   bool accepted = 1;
+}
+
+message JoinRequest {
+  string node_id = 1;
+  string raft_address = 2;
+}
+
+message JoinResponse {
+  bool success = 1;
+  string error_message = 2;
 }
