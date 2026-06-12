@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sequencer
+spec:
+  serviceName: "sequencer"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sequencer
+  template:
+    metadata:
+      labels:
+        app: sequencer
+    spec:
+      containers:
+        - name: sequencer
+          image: secureorder/sequencer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 12345
+              name: grpc
+            - containerPort: 7000
+              name: raft
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: raft-data
+              mountPath: /app/data
+          command:
+            - "/bin/bash"
+            - "-c"
+            - |
+              # Use pod name as the node ID for Raft stability
+              export NODE_ID=${POD_NAME}
+              # Use the headless service DNS for the bind address
+              export RAFT_BIND=$(hostname -f):7000
+
+              ARGS="-ordering=raft -raft-node-id=${NODE_ID} -raft-bind=${RAFT_BIND} -raft-data-dir=/app/data -grpc-addr=:12345"
+
+              # Only the first pod bootstraps the cluster.
+              # Subsequent pods attempt to join via the first pod.
+              if [[ "${POD_NAME}" == "sequencer-0" ]]; then
+                echo "Node 0: Initializing/Bootstrapping cluster..."
+                ARGS="${ARGS} -raft-bootstrap"
+              else
+                echo "Node ${NODE_ID}: Attempting to join cluster via sequencer-0..."
+                ARGS="${ARGS} -raft-join-addr=sequencer-0.sequencer:12345"
+              fi
+
+              exec /app/sequencer ${ARGS}
+  volumeClaimTemplates:
+    - metadata:
+        name: raft-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

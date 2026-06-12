@@ -109,6 +109,110 @@ func (x *SubmitAck) GetAccepted() bool {
 	return false
 }
 
+type JoinRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	RaftAddress   string                 `protobuf:"bytes,2,opt,name=raft_address,json=raftAddress,proto3" json:"raft_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinRequest) Reset() {
+	*x = JoinRequest{}
+	mi := &file_proto_rpc_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinRequest) ProtoMessage() {}
+
+func (x *JoinRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_rpc_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinRequest.ProtoReflect.Descriptor instead.
+func (*JoinRequest) Descriptor() ([]byte, []int) {
+	return file_proto_rpc_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *JoinRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *JoinRequest) GetRaftAddress() string {
+	if x != nil {
+		return x.RaftAddress
+	}
+	return ""
+}
+
+type JoinResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinResponse) Reset() {
+	*x = JoinResponse{}
+	mi := &file_proto_rpc_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinResponse) ProtoMessage() {}
+
+func (x *JoinResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_rpc_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinResponse.ProtoReflect.Descriptor instead.
+func (*JoinResponse) Descriptor() ([]byte, []int) {
+	return file_proto_rpc_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *JoinResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *JoinResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
 var File_proto_rpc_proto protoreflect.FileDescriptor
 
 const file_proto_rpc_proto_rawDesc = "" +
@@ -119,10 +223,17 @@ const file_proto_rpc_proto_rawDesc = "" +
 	"ciphertext\x18\x01 \x01(\fR\n" +
 	"ciphertext\"'\n" +
 	"\tSubmitAck\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted2N\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"I\n" +
+	"\vJoinRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12!\n" +
+	"\fraft_address\x18\x02 \x01(\tR\vraftAddress\"M\n" +
+	"\fJoinResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage2\x94\x01\n" +
 	"\n" +
 	"RPCService\x12@\n" +
-	"\bSubmitTx\x12\x1a.rpc_service.SubmitRequest\x1a\x16.rpc_service.SubmitAck\"\x00B\tZ\a./protob\x06proto3"
+	"\bSubmitTx\x12\x1a.rpc_service.SubmitRequest\x1a\x16.rpc_service.SubmitAck\"\x00\x12D\n" +
+	"\vJoinCluster\x12\x18.rpc_service.JoinRequest\x1a\x19.rpc_service.JoinResponse\"\x00B\tZ\a./protob\x06proto3"
 
 var (
 	file_proto_rpc_proto_rawDescOnce sync.Once
@@ -136,16 +247,20 @@ func file_proto_rpc_proto_rawDescGZIP() []byte {
 	return file_proto_rpc_proto_rawDescData
 }
 
-var file_proto_rpc_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_proto_rpc_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_proto_rpc_proto_goTypes = []any{
 	(*SubmitRequest)(nil), // 0: rpc_service.SubmitRequest
 	(*SubmitAck)(nil),     // 1: rpc_service.SubmitAck
+	(*JoinRequest)(nil),   // 2: rpc_service.JoinRequest
+	(*JoinResponse)(nil),  // 3: rpc_service.JoinResponse
 }
 var file_proto_rpc_proto_depIdxs = []int32{
 	0, // 0: rpc_service.RPCService.SubmitTx:input_type -> rpc_service.SubmitRequest
-	1, // 1: rpc_service.RPCService.SubmitTx:output_type -> rpc_service.SubmitAck
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
+	2, // 1: rpc_service.RPCService.JoinCluster:input_type -> rpc_service.JoinRequest
+	1, // 2: rpc_service.RPCService.SubmitTx:output_type -> rpc_service.SubmitAck
+	3, // 3: rpc_service.RPCService.JoinCluster:output_type -> rpc_service.JoinResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -162,7 +277,7 @@ func file_proto_rpc_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_rpc_proto_rawDesc), len(file_proto_rpc_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

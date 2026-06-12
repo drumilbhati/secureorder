@@ -126,6 +126,47 @@ func (s *Server) SubmitTx(ctx context.Context, req *pb.SubmitRequest) (*pb.Submi
 	return &pb.SubmitAck{Accepted: true}, nil
 }
 
+func (s *Server) JoinCluster(ctx context.Context, req *pb.JoinRequest) (*pb.JoinResponse, error) {
+	rl, ok := s.log.(*sequencing.RaftOrderedLog)
+	if !ok {
+		return &pb.JoinResponse{
+			Success:      false,
+			ErrorMessage: "ordering backend does not support dynamic joins",
+		}, nil
+	}
+
+	if !rl.IsLeader() {
+		leaderRaftAddr := rl.LeaderAddress()
+		if leaderRaftAddr == "" {
+			return &pb.JoinResponse{
+				Success:      false,
+				ErrorMessage: "no leader available in cluster",
+			}, nil
+		}
+
+		host, _, err := net.SplitHostPort(string(leaderRaftAddr))
+		if err != nil {
+			host = leaderRaftAddr
+		}
+		leaderGRPCAddr := net.JoinHostPort(host, "12345")
+
+		leaderClient, err := s.getProxyClient(leaderGRPCAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to leader %s for proxying join: %w", leaderGRPCAddr, err)
+		}
+		return leaderClient.JoinCluster(ctx, req)
+	}
+
+	if err := rl.AddVoter(req.NodeId, req.RaftAddress); err != nil {
+		return &pb.JoinResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("failed to add voter: %v", err),
+		}, nil
+	}
+
+	return &pb.JoinResponse{Success: true}, nil
+}
+
 func (s *Server) ProofCount() int {
 	return s.proofs.Count()
 }
