@@ -303,18 +303,24 @@ CGO_ENABLED=1 go build -o bin/client ./cmd/client
 CGO_ENABLED=1 go build -o bin/rpc-loadtest ./cmd/rpc-loadtest
 ```
 
-### 3. Run a 5-Node Raft Cluster (Demo)
+### 3. Kubernetes Deployment (Autoscaling)
+
+The system is designed to run in a Kubernetes cluster using a `StatefulSet` for stable identities and a `HorizontalPodAutoscaler` (HPA) for load-based scaling.
 
 ```bash
-# Start 5 sequencers
-./scripts/run-5-node-raft.sh --fresh
+# 1. Build the Docker image
+docker build -t secureorder/sequencer:latest .
 
-# Find the current leader's port
-./scripts/find-leader.sh
+# 2. (Optional) Load image into local kind cluster
+kind load docker-image secureorder/sequencer:latest --name secureorder-cluster
 
-# Run a load test against the leader (e.g., port 12345)
-ADDR=localhost:12345 ./scripts/load-local-raft.sh
+# 3. Apply manifests
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/statefulset.yaml
+kubectl apply -f k8s/hpa.yaml
 ```
+
+New nodes will automatically discover the leader via `sequencer-0` and join the Raft consensus group dynamically.
 
 ---
 
