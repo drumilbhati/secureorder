@@ -7,19 +7,30 @@ import (
 	"strconv"
 )
 
-// NewPublisherFromEnv enables EVM commitment publishing when all env vars exist.
-// Required vars:
+// NewPublisherFromEnv constructs the appropriate CommitmentPublisher from
+// environment variables. It provides a safe, zero-config default (NoopPublisher)
+// when the EVM environment is not configured.
 //
-//	ORDER_VERIFIER_RPC_URL
-//	ORDER_VERIFIER_CONTRACT
-//	ORDER_VERIFIER_PRIVATE_KEY
-//	ORDER_VERIFIER_CHAIN_ID
+// Required environment variables for EVM publishing:
+//
+//	ORDER_VERIFIER_RPC_URL     — JSON-RPC endpoint, e.g. "http://127.0.0.1:8545"
+//	ORDER_VERIFIER_CONTRACT    — deployed OrderVerifier contract address (0x...)
+//	ORDER_VERIFIER_PRIVATE_KEY — hex-encoded ECDSA private key used to sign txs
+//	ORDER_VERIFIER_CHAIN_ID    — EVM chain ID as a decimal integer, e.g. "31337"
+//
+// Behaviour:
+//   - If any variable is missing → returns NoopPublisher (no error). This allows
+//     the sequencer to start without EVM access in local/dev mode.
+//   - If all variables are present but ORDER_VERIFIER_CHAIN_ID is not a valid
+//     integer → returns an error (misconfiguration, fail fast).
+//   - If all variables are present and valid → returns a live EVMPublisher.
 func NewPublisherFromEnv() (CommitmentPublisher, error) {
 	rpcURL := os.Getenv("ORDER_VERIFIER_RPC_URL")
 	contract := os.Getenv("ORDER_VERIFIER_CONTRACT")
 	pk := os.Getenv("ORDER_VERIFIER_PRIVATE_KEY")
 	chainIDRaw := os.Getenv("ORDER_VERIFIER_CHAIN_ID")
 
+	// If any required variable is absent, silently degrade to no-op.
 	if rpcURL == "" || contract == "" || pk == "" || chainIDRaw == "" {
 		return NoopPublisher{}, nil
 	}
